@@ -1,0 +1,26 @@
+
+services:
+  paddleocr-vl:
+    image: ccr-2vdh3abv-pub.cnc.bj.baidubce.com/paddlepaddle/paddleocr-vl:latest-nvidia-gpu
+    container_name: paddleocr-vl
+    runtime: nvidia
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    volumes:
+      - ./data:/mnt/data       # input files
+      - ./output:/mnt/output   # results
+      - ./web_client.py:/workspace/web_client.py  # copy script into container
+      - ./paddlex_cache:/root/.paddlex
+    shm_size: "32g"
+    ports:
+      - "7860:7860"
+
+    command: >
+      bash -c "pip install gradio==6.20.0 &&
+                 python /workspace/web_client.py"
+
