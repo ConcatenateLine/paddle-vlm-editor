@@ -15,7 +15,8 @@ services:
       - ./data:/mnt/data       # input files
       - ./output:/mnt/output   # results
       - ./web_client.py:/workspace/web_client.py  # copy script into container
-      - ./paddlex_cache:/root/.paddlex
+      - ./paddlex_cache:/home/paddleocr/.paddlex
+      - ./doc_parser_worker.py:/workspace/doc_parser_worker.py
     shm_size: "32g"
     ports:
       - "7860:7860"
