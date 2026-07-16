@@ -64,6 +64,23 @@ Notes
 - Files dropped into ./data on the host (-> /mnt/data in the container)
   show up in the "Pick from /mnt/data" dropdown, so you don't have to
   re-upload large PDFs through the browser each time.
+
+- EDITOR: the "Edit" tab uses Quill (bubble theme) loaded from a CDN for
+  a distraction-free editor whose toolbar only appears inline, over a
+  text selection. Gradio has no native rich-text component, so a plain
+  <div id="quill-editor"> is injected via gr.HTML, Quill mounts onto it
+  client-side, and a hidden gr.Textbox (#quill_hidden_content) is used
+  as the bridge back to Python: JS snippets attached to existing events
+  push/pull the editor's HTML into/out of that hidden textbox. See the
+  QUILL_HEAD / _push_into_quill_js / _pull_from_quill_js constants below.
+
+  Caveat: Quill works with HTML (via a Delta model), not Markdown. What
+  you save from the Edit tab is HTML, even for pipelines whose output
+  started as Markdown/plain text (OCR, formula, doc_parser). That's fine
+  as long as you're OK with result.md holding HTML after an edit+save
+  round trip. If you need real Markdown round-tripping, convert at the
+  JS boundary (e.g. with a small client-side markdown<->HTML library
+  like `marked` + `turndown`) or in Python on save.
 """
 
 import json
@@ -361,6 +378,18 @@ def _read_first_matching(directory: Path, suffix: str) -> str:
     return matches[0].read_text(encoding="utf-8", errors="replace")
 
 
+def _extract_res(data: dict) -> dict:
+    """PaddleX/PaddleOCR pipeline JSON is wrapped under a top-level 'res'
+    key in some versions, and flat (fields directly at the top level) in
+    others. Try the wrapped form first, and fall back to the raw dict
+    itself so field lookups (rec_texts, rec_formula, result, ...) work
+    either way instead of silently returning nothing."""
+    res = data.get("res")
+    if isinstance(res, dict) and res:
+        return res
+    return data
+
+
 def run_ocr(pipeline, input_path: str, work_dir: Path):
     outputs = pipeline.predict(input_path)
     text_parts, json_parts = [], []
@@ -372,12 +401,18 @@ def run_ocr(pipeline, input_path: str, work_dir: Path):
         json_parts.append(raw_json)
         try:
             data = json.loads(raw_json)
-            texts = data.get("res", {}).get("rec_texts", [])
+            texts = _extract_res(data).get("rec_texts", [])
             text_parts.append("\n".join(texts))
         except Exception:
             pass
     combined_text = "\n\n".join(text_parts)
     combined_json = "[\n" + ",\n".join(p for p in json_parts if p) + "\n]"
+    if not combined_text.strip() and any(p.strip() for p in json_parts):
+        combined_text = (
+            "_No text was extracted -- the saved JSON didn't have a `rec_texts` field "
+            "at the expected location. Check result_raw.json for this run's actual field "
+            "names/shape._"
+        )
     return combined_text, combined_json, "text"
 
 
@@ -407,7 +442,7 @@ def run_formula(pipeline, input_path: str, work_dir: Path):
         json_parts.append(raw_json)
         try:
             data = json.loads(raw_json)
-            formulas = data.get("res", {}).get("rec_formula", [])
+            formulas = _extract_res(data).get("rec_formula", [])
             if isinstance(formulas, str):
                 formulas = [formulas]
             text_parts.append("\n\n".join(f"$$\n{f}\n$$" for f in formulas))
@@ -435,7 +470,7 @@ def run_chart(pipeline, input_path: str, work_dir: Path):
         json_parts.append(raw_json)
         try:
             data = json.loads(raw_json)
-            text_parts.append(data.get("res", {}).get("result", ""))
+            text_parts.append(_extract_res(data).get("result", ""))
         except Exception:
             pass
     combined_text = "\n\n".join(text_parts)
@@ -464,10 +499,10 @@ def process_file(file, data_choice, pipeline_label, device):
     elif data_choice:
         source_path = DATA_DIR / data_choice
     else:
-        return "Upload a file or pick one from /mnt/data first.", gr.update(), gr.update(), gr.update(), None, None
+        return "Upload a file or pick one from /mnt/data first.", gr.update(), gr.update(), gr.update(), None
 
     if not source_path.exists():
-        return f"File not found: {source_path}", gr.update(), gr.update(), gr.update(), None, None
+        return f"File not found: {source_path}", gr.update(), gr.update(), gr.update(), None
 
     pipeline_key = PIPELINES[pipeline_label]
     record_id = uuid.uuid4().hex[:12]
@@ -533,24 +568,22 @@ def process_file(file, data_choice, pipeline_label, device):
         preview_update,
         file_update,
         output_text,
-        output_text,
     )
 
 
 def load_from_library(record_id):
     if not record_id:
-        return "", "", None, gr.update(value=None, visible=False), gr.update(value=None, visible=True)
+        return "", gr.update(value=None, visible=False), gr.update(value=None, visible=True)
 
     record = find_record(record_id)
     if record is None:
-        return "Record not found.", "", None, gr.update(value=None, visible=False), gr.update(value=None, visible=True)
+        return "Record not found.", gr.update(value=None, visible=False), gr.update(value=None, visible=True)
 
     if record["status"] != "done":
         text = f"This run failed:\n\n{record.get('error', 'unknown error')}"
         original = record["original_path"]
         is_image = Path(original).suffix.lower() in IMAGE_EXTS
         return (
-            text,
             text,
             gr.update(value=original if is_image else None, visible=is_image),
             gr.update(value=original if not is_image else None, visible=not is_image),
@@ -561,7 +594,6 @@ def load_from_library(record_id):
     is_image = Path(original).suffix.lower() in IMAGE_EXTS
 
     return (
-        output_text,
         output_text,
         gr.update(value=original if is_image else None, visible=is_image),
         gr.update(value=original if not is_image else None, visible=not is_image),
@@ -584,10 +616,119 @@ def refresh_library():
 
 
 # ---------------------------------------------------------------------------
+# Quill (bubble theme) wiring
+# ---------------------------------------------------------------------------
+# Loaded once into <head> so the library is available before any of our
+# JS snippets run. Bubble theme == the "inline toolbar" you asked for: no
+# fixed toolbar row, it floats over the current text selection instead.
+QUILL_HEAD = """
+<link href="https://cdn.jsdelivr.net/npm/quill@2.0.3/dist/quill.bubble.css" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/quill@2.0.3/dist/quill.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/marked@12.0.2/marked.min.js"></script>
+<style>
+  #quill-editor-wrap { border: 1px solid var(--border-color-primary, #444); border-radius: 8px; }
+  /* quill_hidden_content is a bridge component only -- it must stay
+     mounted in the DOM for the JS push/pull snippets to find it, so we
+     hide it with CSS rather than Gradio's visible=False (which can
+     conditionally unmount the component instead of just hiding it,
+     silently breaking the bridge). */
+  #quill_hidden_content { display: none !important; }
+  #quill-editor { min-height: 560px; background: var(--background-fill-primary, #fff); }
+  .ql-editor { min-height: 560px; font-size: 15px; line-height: 1.6; }
+  .ql-editor table { border-collapse: collapse; }
+  .ql-editor table td, .ql-editor table th { border: 1px solid #999; padding: 4px 8px; }
+</style>
+"""
+
+# Mounts Quill on page load. Retries until the CDN script (and the
+# gr.HTML div it targets) actually exist in the DOM, since Gradio renders
+# client-side and there's no guaranteed ordering against the CDN <script>.
+_QUILL_INIT_JS = """
+() => {
+  function initQuill() {
+    const target = document.getElementById('quill-editor');
+    if (!target || typeof Quill === 'undefined') {
+      setTimeout(initQuill, 200);
+      return;
+    }
+    if (window.quillEditor) return;
+
+    if (typeof marked !== 'undefined') {
+      marked.setOptions({ breaks: true, gfm: true });
+    }
+
+    window.quillEditor = new Quill('#quill-editor', {
+      theme: 'bubble',
+      placeholder: 'Run a pipeline or pick a file from the workspace history to edit its output...',
+      modules: {
+        toolbar: [
+          [{ header: [1, 2, 3, false] }],
+          ['bold', 'italic', 'underline', 'strike'],
+          ['blockquote', 'code-block'],
+          [{ list: 'ordered' }, { list: 'bullet' }],
+          ['link'],
+          ['clean']
+        ]
+      }
+    });
+
+    // Every keystroke/format change mirrors into the hidden textbox so
+    // Python can read it (e.g. on Save).
+    window.quillEditor.on('text-change', () => {
+      const hidden = document.querySelector('#quill_hidden_content textarea');
+      if (hidden) {
+        hidden.value = window.quillEditor.root.innerHTML;
+        hidden.dispatchEvent(new Event('input', { bubbles: true }));
+      }
+    });
+  }
+  setTimeout(initQuill, 300);
+}
+"""
+
+# Pulls whatever Python just wrote into the hidden textbox and pushes it
+# INTO the Quill editor, running it through `marked` first so Markdown
+# and plain-text pipeline output (OCR, formula, doc_parser) actually
+# render -- not just show up as literal "# Heading" text. Pipelines that
+# already emit HTML (table_recognition_v2) pass through marked mostly
+# unchanged, since marked leaves well-formed raw HTML blocks alone.
+# Chain this with .then() right after any event that updates
+# quill_hidden from the backend (process_file, load_from_library).
+_PUSH_INTO_QUILL_JS = """
+() => {
+  const hidden = document.querySelector('#quill_hidden_content textarea');
+  if (!hidden) {
+    console.warn('[quill bridge] hidden textarea (#quill_hidden_content) not found in DOM');
+    return;
+  }
+  if (!window.quillEditor) {
+    console.warn('[quill bridge] quillEditor not initialized yet');
+    return;
+  }
+  const raw = hidden.value || '';
+  const html = (typeof marked !== 'undefined') ? marked.parse(raw) : raw;
+  window.quillEditor.root.innerHTML = html;
+}
+"""
+
+# Pulls the CURRENT Quill HTML out into the hidden textbox. Run this
+# before any event that needs to read the latest edited content on the
+# Python side (e.g. Save).
+_PULL_FROM_QUILL_JS = """
+() => {
+  const hidden = document.querySelector('#quill_hidden_content textarea');
+  if (hidden && window.quillEditor) {
+    hidden.value = window.quillEditor.root.innerHTML;
+    hidden.dispatchEvent(new Event('input', { bubbles: true }));
+  }
+}
+"""
+
+# ---------------------------------------------------------------------------
 # UI
 # ---------------------------------------------------------------------------
 def build_demo():
-    with gr.Blocks(title="PaddleOCR-VL Workspace") as demo:
+    with gr.Blocks(title="PaddleOCR-VL Workspace", head=QUILL_HEAD) as demo:
         gr.Markdown(
             "## PaddleOCR-VL Local Workspace\n"
             "Upload a PDF or image, pick a pipeline, and edit the extracted result. "
@@ -596,43 +737,47 @@ def build_demo():
 
         current_record = gr.State(value=None)
 
+        # --- Controls, all up top: input + pipeline + run on one line,
+        # status + workspace history on the next. ---
+        with gr.Row():
+            file_input = gr.File(label="Upload PDF or Image", scale=2)
+            data_dir_dropdown = gr.Dropdown(
+                choices=list_data_dir(), label="...or pick a file already in /mnt/data", scale=2
+            )
+            refresh_data_button = gr.Button("↻", scale=0, min_width=40)
+            pipeline_selector = gr.Dropdown(
+                choices=list(PIPELINES.keys()), value="Document Parser", label="Pipeline", scale=1
+            )
+            device_selector = gr.Radio(
+                choices=["gpu", "cpu"], value="gpu", label="Device", scale=1,
+                info="gpu is the default; switch to cpu only for debugging."
+            )
+            run_button = gr.Button("Run", variant="primary", scale=1)
+
+        with gr.Row():
+            status_box = gr.Textbox(label="Status", lines=2, interactive=False, scale=2)
+            library_dropdown = gr.Dropdown(
+                choices=library_choices(load_index()), label="Workspace history", interactive=True, scale=2
+            )
+
+        # --- Below: original on the left, combined preview+edit on the right. ---
         with gr.Row():
             with gr.Column(scale=1):
-                file_input = gr.File(label="Upload PDF or Image")
-                with gr.Row():
-                    data_dir_dropdown = gr.Dropdown(
-                        choices=list_data_dir(), label="...or pick a file already in /mnt/data",
-                        scale=4,
-                    )
-                    refresh_data_button = gr.Button("↻", scale=1)
-                pipeline_selector = gr.Dropdown(
-                    choices=list(PIPELINES.keys()), value="Document Parser", label="Pipeline"
-                )
-                device_selector = gr.Radio(
-                    choices=["gpu", "cpu"], value="gpu", label="Device",
-                    info="This container reserves an NVIDIA GPU, so gpu is the default. Switch to cpu only for debugging."
-                )
-                run_button = gr.Button("Run", variant="primary")
-                status_box = gr.Textbox(label="Status", lines=3, interactive=False)
-
-                gr.Markdown("### Workspace history")
-                library_dropdown = gr.Dropdown(
-                    choices=library_choices(load_index()), label="Previous files", interactive=True
-                )
+                image_preview = gr.Image(label="Original", visible=False, height=560)
+                file_preview = gr.File(label="Original file", visible=True)
 
             with gr.Column(scale=2):
-                with gr.Row():
-                    image_preview = gr.Image(label="Original", visible=False, height=280)
-                    file_preview = gr.File(label="Original file", visible=True)
+                # Quill renders Markdown/HTML output directly, so this one
+                # pane replaces the separate Preview + Edit tabs -- what
+                # you see is what you can immediately click into and edit.
+                gr.HTML('<div id="quill-editor-wrap"><div id="quill-editor"></div></div>')
+                # Bridge only -- never shown to the user. Quill's HTML
+                # lives here so Python can read/write it.
+                quill_hidden = gr.Textbox(elem_id="quill_hidden_content", visible=True)
+                save_button = gr.Button("Save edits")
 
-                with gr.Tabs():
-                    with gr.Tab("Preview"):
-                        output_preview = gr.Markdown(label="Rendered output")
-                    with gr.Tab("Edit"):
-                        output_edit = gr.Textbox(
-                            label="Editable output", lines=22, buttons=["copy"]
-                        )
-                        save_button = gr.Button("Save edits")
+        # Mount Quill once, as soon as the page loads.
+        demo.load(fn=None, js=_QUILL_INIT_JS)
 
         refresh_data_button.click(
             lambda: gr.update(choices=list_data_dir()), inputs=[], outputs=[data_dir_dropdown]
@@ -641,7 +786,10 @@ def build_demo():
         run_button.click(
             process_file,
             inputs=[file_input, data_dir_dropdown, pipeline_selector, device_selector],
-            outputs=[status_box, library_dropdown, image_preview, file_preview, output_preview, output_edit],
+            outputs=[status_box, library_dropdown, image_preview, file_preview, quill_hidden],
+        ).then(
+            # New content just landed in the hidden textbox -- render it into Quill.
+            fn=None, js=_PUSH_INTO_QUILL_JS
         )
 
         # Any change to the dropdown (from the user picking a past file, OR
@@ -651,14 +799,19 @@ def build_demo():
         library_dropdown.change(
             load_from_library,
             inputs=[library_dropdown],
-            outputs=[output_preview, output_edit, image_preview, file_preview],
+            outputs=[quill_hidden, image_preview, file_preview],
+        ).then(
+            fn=None, js=_PUSH_INTO_QUILL_JS
         )
         library_dropdown.change(lambda rid: rid, inputs=[library_dropdown], outputs=[current_record])
 
         save_button.click(
+            # Grab the latest Quill HTML before running the Python save.
+            fn=None, js=_PULL_FROM_QUILL_JS
+        ).then(
             save_edit,
-            inputs=[current_record, output_edit],
-            outputs=[status_box, output_edit],
+            inputs=[current_record, quill_hidden],
+            outputs=[status_box, quill_hidden],
         )
 
     return demo
