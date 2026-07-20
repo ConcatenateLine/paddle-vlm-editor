@@ -630,212 +630,148 @@ QUILL_HEAD = """
   #quill_hidden_content { display: none !important; }
   #quill-editor { min-height: 560px; background: var(--background-fill-primary, #fff); }
   .ql-editor { min-height: 560px; font-size: 15px; line-height: 1.6; }
-  .ql-editor table { border-collapse: collapse; }
-  .ql-editor table td, .ql-editor table th { border: 1px solid #999; padding: 4px 8px; }
+  .ql-editor table { border-collapse: collapse; width: 100%; margin: 10px 0; }
+  .ql-editor table td, .ql-editor table th { border: 1px solid #999; padding: 8px 12px; text-align: left; }
+  .ql-editor table th { background: #f0f0f0; font-weight: bold; }
+  .ql-editor table tr:nth-child(even) { background: #f9f9f9; }
   .ql-editor .formula { background: #f5f5f5; padding: 10px; margin: 10px 0; border-radius: 4px; font-family: 'Courier New', monospace; }
   .ql-editor pre { background: #f5f5f5; padding: 10px; margin: 10px 0; border-radius: 4px; overflow-x: auto; }
   .ql-editor .page-separator { border: none; border-top: 2px dashed #ccc; margin: 20px 0; }
+  .ql-editor .table-container { overflow-x: auto; margin: 10px 0; }
+  .ql-editor .table-container table { min-width: 100%; }
 </style>
 <script>
-function escapeHtml(text) {
+window.escapeHtml = function(text) {
   const div = document.createElement('div');
   div.textContent = text;
   return div.innerHTML;
-}
+};
 
-function jsonToHtml(jsonData) { 
-  console.log('[jsonToHtml] Input type:', typeof jsonData);
-  console.log('[jsonToHtml] Input length:', typeof jsonData === 'string' ? jsonData.length : 'N/A');
-  console.log('[jsonToHtml] Input preview:', typeof jsonData === 'string' ? jsonData.substring(0, 200) : JSON.stringify(jsonData).substring(0, 200));
- 
+window.jsonToHtml = function(jsonData) {
   try {
     const data = typeof jsonData === 'string' ? JSON.parse(jsonData) : jsonData;
-     console.log('[jsonToHtml] Parsed data type:', Array.isArray(data) ? 'array' : typeof data);
-
-    // Handle array of page results
+    
     if (Array.isArray(data)) {
-      console.log('[jsonToHtml] Processing array with', data.length, 'pages');
-      return data.map(page => convertPageToHtml(page)).join('<hr class="page-separator">');
+      return data.map(function(page) {
+        if (page.parsing_res_list && Array.isArray(page.parsing_res_list)) {
+          return page.parsing_res_list.map(window.convertBlockToHtml).join('');
+        }
+        return window.convertPageToHtml(page);
+      }).join('<hr class="page-separator">');
     }
     
-    // Handle single page/result
-    console.log('[jsonToHtml] Processing single page');
-    return convertPageToHtml(data);
+    if (data.parsing_res_list && Array.isArray(data.parsing_res_list)) {
+      return data.parsing_res_list.map(window.convertBlockToHtml).join('');
+    }
+    
+    return window.convertPageToHtml(data);
   } catch (e) {
-    console.error('[jsonToHtml] Error parsing JSON:', e);
-    return `<pre style="color: red;">Error parsing JSON: ${escapeHtml(e.message)}<br><br>Raw content:<br>${escapeHtml(typeof jsonData === 'string' ? jsonData : JSON.stringify(jsonData))}</pre>`;
+    console.error('[jsonToHtml] Error:', e);
+    return '<pre style="color: red;">Error parsing JSON: ' + window.escapeHtml(e.message) + '</pre>';
   }
-}
+};
 
-function convertPageToHtml(pageData) {
-  console.log('[convertPageToHtml] Input pageData:', JSON.stringify(pageData).substring(0, 300));
+window.convertBlockToHtml = function(block) {
+  if (block.text) {
+    return '<p>' + window.escapeHtml(block.text) + '</p>';
+  }
   
-  // Handle legacy markdown format
+  if (block.rec_texts && Array.isArray(block.rec_texts)) {
+    return block.rec_texts.map(function(t) { return '<p>' + window.escapeHtml(t) + '</p>'; }).join('');
+  }
+  
+  if (block.content) {
+    return '<p>' + window.escapeHtml(block.content) + '</p>';
+  }
+  
+  if (block.block_content) {
+    const label = block.block_label || '';
+    const content = block.block_content;
+    
+    if (label === 'title' || label === 'header' || label === 'paragraph_title') {
+      return '<h2>' + window.escapeHtml(content) + '</h2>';
+    }
+    if (label === 'text' || label === 'paragraph') {
+      return '<p>' + window.escapeHtml(content) + '</p>';
+    }
+    if (label === 'table' || label === 'table_body') {
+      console.log('[convertBlockToHtml] Table block content length:', content.length);
+      console.log('[convertBlockToHtml] Table block content preview:', content.substring(0, 500));
+      if (content.indexOf('<table') >= 0 || content.indexOf('<tr') >= 0 || content.indexOf('<td') >= 0) {
+        return content;
+      }
+      return '<div class="table-container">' + window.escapeHtml(content) + '</div>';
+    }
+    if (label === 'list') {
+      return '<li>' + window.escapeHtml(content) + '</li>';
+    }
+    if (label === 'number') {
+      return '<span>' + window.escapeHtml(content) + '</span>';
+    }
+    if (label === 'header_image') {
+      if (content && content.trim()) {
+        return '<p><em>[Image: ' + window.escapeHtml(content) + ']</em></p>';
+      }
+      return '';
+    }
+    if (label === 'footer') {
+      return '<p><small>' + window.escapeHtml(content) + '</small></p>';
+    }
+    if (label === 'formula') {
+      return '<div class="formula">$$' + window.escapeHtml(content) + '$$</div>';
+    }
+    if (label === 'code') {
+      return '<pre><code>' + window.escapeHtml(content) + '</code></pre>';
+    }
+    if (label === 'blockquote') {
+      return '<blockquote>' + window.escapeHtml(content) + '</blockquote>';
+    }
+    
+    return '<p>' + window.escapeHtml(content) + '</p>';
+  }
+  
+  if (block.html) {
+    return block.html;
+  }
+  
+  return '<pre>' + JSON.stringify(block, null, 2) + '</pre>';
+};
+
+window.convertPageToHtml = function(pageData) {
   if (pageData.markdown && pageData.legacy_format) {
-    console.log('[convertPageToHtml] Found legacy markdown format');
-    return `<pre>${escapeHtml(pageData.markdown)}</pre>`;
+    return '<pre>' + window.escapeHtml(pageData.markdown) + '</pre>';
   }
 
   const res = pageData.res || pageData;
-  console.log('[convertPageToHtml] Extracted res:', JSON.stringify(res).substring(0, 300));
-  console.log('[convertPageToHtml] All keys in res:', Object.keys(res));
-   
-  // Log nested structures for debugging
-  if (res.layout_dets) console.log('[convertPageToHtml] layout_dets type:', typeof res.layout_dets, 'isArray:', Array.isArray(res.layout_dets));
-  if (res.cells) console.log('[convertPageToHtml] cells type:', typeof res.cells, 'isArray:', Array.isArray(res.cells));
-  if (res.poly) console.log('[convertPageToHtml] poly type:', typeof res.poly, 'isArray:', Array.isArray(res.poly));
-  if (res.rec_texts) console.log('[convertPageToHtml] rec_texts type:', typeof res.rec_texts, 'isArray:', Array.isArray(res.rec_texts));
-  if (res.html) console.log('[convertPageToHtml] html type:', typeof res.html);
-  if (res.rec_formula) console.log('[convertPageToHtml] rec_formula type:', typeof res.rec_formula);
-  if (res.result) console.log('[convertPageToHtml] result type:', typeof res.result);
-  if (res.parsing_res_list) console.log('[convertPageToHtml] parsing_res_list type:', typeof res.parsing_res_list, 'isArray:', Array.isArray(res.parsing_res_list));
-  if (res.layout_det_res) console.log('[convertPageToHtml] layout_det_res type:', typeof res.layout_det_res);
-
   let html = '';
   
-  // OCR: rec_texts array
-  if (res.rec_texts && Array.isArray(res.rec_texts)) { 
-    console.log('[convertPageToHtml] Found rec_texts with', res.rec_texts.length, 'items');
-    html += res.rec_texts.map(text => `<p>${escapeHtml(text)}</p>`).join('');
+  if (res.rec_texts && Array.isArray(res.rec_texts)) {
+    html += res.rec_texts.map(function(t) { return '<p>' + window.escapeHtml(t) + '</p>'; }).join('');
   }
   
-  // Table: HTML content
   if (res.html) {
-    console.log('[convertPageToHtml] Found html content');
     html += res.html;
   }
   
-  // Formula: rec_formula array
   if (res.rec_formula) {
     const formulas = Array.isArray(res.rec_formula) ? res.rec_formula : [res.rec_formula];
-    console.log('[convertPageToHtml] Found rec_formula with', formulas.length, 'items');
-    html += formulas.map(f => `<div class="formula">$$${escapeHtml(f)}$$</div>`).join('');
+    html += formulas.map(function(f) { return '<div class="formula">$$' + window.escapeHtml(f) + '$$</div>'; }).join('');
   }
   
-  // Chart: result data
   if (res.result && typeof res.result === 'string') {
-    console.log('[convertPageToHtml] Found result string');
-    html += `<pre>${escapeHtml(res.result)}</pre>`;
+    html += '<pre>' + window.escapeHtml(res.result) + '</pre>';
   }
 
-   // Doc Parser: layout_dets (layout detections)
-    if (res.layout_dets && Array.isArray(res.layout_dets)) {
-      console.log('[convertPageToHtml] Found layout_dets with', res.layout_dets.length, 'items');
-      html += res.layout_dets.map(det => {
-        if (det.text) {
-          return `<p>${escapeHtml(det.text)}</p>`;
-        }
-        return '';
-      }).join('');
-    }
-   
-    // Doc Parser: cells (table cells)
-    if (res.cells && Array.isArray(res.cells)) {
-      console.log('[convertPageToHtml] Found cells with', res.cells.length, 'items');
-      html += '<table border="1" style="border-collapse: collapse; margin: 10px 0;">';
-      res.cells.forEach(cell => {
-        html += `<tr><td style="border: 1px solid #ccc; padding: 8px;">${escapeHtml(cell.text || JSON.stringify(cell))}</td></tr>`;
-      });
-      html += '</table>';
-    }
-   
-    // Doc Parser: poly (text blocks with bbox)
-    if (res.poly && Array.isArray(res.poly)) {
-      console.log('[convertPageToHtml] Found poly with', res.poly.length, 'items');
-      html += res.poly.map(p => {
-        if (p.text || p.rec_texts) {
-          const text = p.text || (Array.isArray(p.rec_texts) ? p.rec_texts.join(' ') : '');
-          return `<p>${escapeHtml(text)}</p>`;
-        }
-        return '';
-      }).join('');
-    }
-    
-    // Doc Parser: parsing_res_list (parsing results)
-    if (res.parsing_res_list && Array.isArray(res.parsing_res_list)) {
-      console.log('[convertPageToHtml] Found parsing_res_list with', res.parsing_res_list.length, 'items');
-      console.log('[convertPageToHtml] First parsing_res_list item:', JSON.stringify(res.parsing_res_list[0]).substring(0, 300));
-      html += res.parsing_res_list.map(item => { 
-        console.log('[convertPageToHtml] Processing parsing_res_list item keys:', Object.keys(item));
-        if (item.text) {
-          return `<p>${escapeHtml(item.text)}</p>`;
-        }
-        if (item.rec_texts && Array.isArray(item.rec_texts)) {
-          return item.rec_texts.map(text => `<p>${escapeHtml(text)}</p>`).join('');
-        }
-        if (item.content) {
-          return `<p>${escapeHtml(item.content)}</p>`;
-        }
-        if (item.block_content) {
-          // Use block_label to determine formatting
-          const label = item.block_label || '';
-          const content = item.block_content;
-          
-          // Handle different block types
-          if (label === 'title' || label === 'header' || label === 'paragraph_title') {
-            return `<h2>${escapeHtml(content)}</h2>`;
-          } else if (label === 'text' || label === 'paragraph') {
-            return `<p>${escapeHtml(content)}</p>`;
-          } else if (label === 'table' || label === 'table_body') {
-            // For tables, render the HTML directly if it contains table tags
-            if (content.includes('<table') || content.includes('<tr') || content.includes('<td')) {
-              // Convert newlines to breaks within table cells
-              return content.replace(/\\n/g, '<br>').replace(/\n/g, '<br>');
-            }
-            return `<p>${escapeHtml(content)}</p>`;
-          } else if (label === 'list') {
-            return `<li>${escapeHtml(content)}</li>`;
-          } else if (label === 'number') {
-            return `<span>${escapeHtml(content)}</span>`;
-          } else if (label === 'header_image') {
-            return `<p><em>[Image: ${escapeHtml(content)}]</em></p>`;
-          } else if (label === 'footer') {
-            return `<p><small>${escapeHtml(content)}</small></p>`;
-          } else {
-            // Default to paragraph for unknown types
-            return `<p>${escapeHtml(content)}</p>`;
-          }
-        }
-        if (item.html) {
-          return item.html;
-        }
-        return '';
-      }).join('');
-    }
-     
-    // Doc Parser: layout_det_res (layout detection results)
-    if (res.layout_det_res) {
-      console.log('[convertPageToHtml] Found layout_det_res');
-        if (Array.isArray(res.layout_det_res)) {
-          html += res.layout_det_res.map(det => {
-            if (det.text) {
-              return `<p>${escapeHtml(det.text)}</p>`;
-            }
-            return '';
-          }).join('');
-        } else if (typeof res.layout_det_res === 'object') {
-          // Handle nested structure
-          Object.values(res.layout_det_res).forEach(det => {
-            if (Array.isArray(det)) {
-              html += det.map(d => {
-                if (d.text) return `<p>${escapeHtml(d.text)}</p>`;
-                return '';
-              }).join('');
-            }
-          });
-        }
-      }
-
-  // Fallback: pretty-print the JSON
+  if (res.parsing_res_list && Array.isArray(res.parsing_res_list)) {
+    html += res.parsing_res_list.map(window.convertBlockToHtml).join('');
+  }
+  
   if (!html) {
-    console.log('[convertPageToHtml] No content found, using fallback');
-    html += `<pre>${JSON.stringify(res, null, 2)}</pre>`;
+    html = '<pre>' + JSON.stringify(res, null, 2) + '</pre>';
   }
 
-  console.log('[convertPageToHtml] Generated HTML length:', html.length);
-  console.log('[convertPageToHtml] Generated HTML preview:', html.substring(0, 200));
   return html;
-}
+};
 </script>
 """
 
@@ -913,14 +849,13 @@ _PUSH_INTO_QUILL_JS = """
   console.log('[PUSH_INTO_QUILL] Hidden textarea value length:', raw.length);
   console.log('[PUSH_INTO_QUILL] Hidden textarea value preview:', raw.substring(0, 200));
   console.log('[PUSH_INTO_QUILL] Hidden textarea value empty:', raw.length === 0);
-  console.log('[PUSH_INTO_QUILL] jsonToHtml available:', typeof jsonToHtml !== 'undefined');
    
    if (raw.length === 0) {
       console.warn('[PUSH_INTO_QUILL] Hidden textarea is empty - nothing to push');
       return;
-    }
+   }
    
-  const html = (typeof jsonToHtml !== 'undefined') ? jsonToHtml(raw) : raw;
+  const html = window.jsonToHtml ? window.jsonToHtml(raw) : raw;
   console.log('[PUSH_INTO_QUILL] Generated HTML length:', html.length);
   console.log('[PUSH_INTO_QUILL] Generated HTML preview:', html.substring(0, 200));
   console.log('[PUSH_INTO_QUILL] Setting editor innerHTML');
