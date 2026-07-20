@@ -42,17 +42,14 @@ def _read_first_matching(directory: Path, suffix: str) -> str:
 
 def run_doc_parser(pipeline, input_path: str, work_dir: Path):
     outputs = pipeline.predict(input_path)
-    md_parts, json_parts = [], []
+    json_parts = []
     for i, res in enumerate(outputs):
         page_dir = work_dir / f"page_{i:03d}"
         page_dir.mkdir(exist_ok=True)
-        res.save_to_markdown(save_path=str(page_dir))
         res.save_to_json(save_path=str(page_dir))
-        md_parts.append(_read_first_matching(page_dir, ".md"))
         json_parts.append(_read_first_matching(page_dir, ".json"))
-    combined_md = "\n\n---\n\n".join(p for p in md_parts if p)
     combined_json = "[\n" + ",\n".join(p for p in json_parts if p) + "\n]"
-    return combined_md, combined_json, "markdown"
+    return combined_json, "json"
 
 
 def is_static_graph_bug(exc: Exception) -> bool:

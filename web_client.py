@@ -392,65 +392,41 @@ def _extract_res(data: dict) -> dict:
 
 def run_ocr(pipeline, input_path: str, work_dir: Path):
     outputs = pipeline.predict(input_path)
-    text_parts, json_parts = [], []
+    json_parts = []
     for i, res in enumerate(outputs):
         page_dir = work_dir / f"page_{i:03d}"
         page_dir.mkdir(exist_ok=True)
         res.save_to_json(save_path=str(page_dir))
         raw_json = _read_first_matching(page_dir, ".json")
         json_parts.append(raw_json)
-        try:
-            data = json.loads(raw_json)
-            texts = _extract_res(data).get("rec_texts", [])
-            text_parts.append("\n".join(texts))
-        except Exception:
-            pass
-    combined_text = "\n\n".join(text_parts)
     combined_json = "[\n" + ",\n".join(p for p in json_parts if p) + "\n]"
-    if not combined_text.strip() and any(p.strip() for p in json_parts):
-        combined_text = (
-            "_No text was extracted -- the saved JSON didn't have a `rec_texts` field "
-            "at the expected location. Check result_raw.json for this run's actual field "
-            "names/shape._"
-        )
-    return combined_text, combined_json, "text"
+    return combined_json, "json"
 
 
 def run_table(pipeline, input_path: str, work_dir: Path):
     outputs = pipeline.predict(input_path)
-    html_parts, json_parts = [], []
+    json_parts = []
     for i, res in enumerate(outputs):
         page_dir = work_dir / f"page_{i:03d}"
         page_dir.mkdir(exist_ok=True)
         res.save_to_html(save_path=str(page_dir))
         res.save_to_json(save_path=str(page_dir))
-        html_parts.append(_read_first_matching(page_dir, ".html"))
         json_parts.append(_read_first_matching(page_dir, ".json"))
-    combined_html = "\n\n".join(h for h in html_parts if h)
     combined_json = "[\n" + ",\n".join(p for p in json_parts if p) + "\n]"
-    return combined_html, combined_json, "html"
+    return combined_json, "json"
 
 
 def run_formula(pipeline, input_path: str, work_dir: Path):
     outputs = pipeline.predict(input_path)
-    text_parts, json_parts = [], []
+    json_parts = []
     for i, res in enumerate(outputs):
         page_dir = work_dir / f"page_{i:03d}"
         page_dir.mkdir(exist_ok=True)
         res.save_to_json(save_path=str(page_dir))
         raw_json = _read_first_matching(page_dir, ".json")
         json_parts.append(raw_json)
-        try:
-            data = json.loads(raw_json)
-            formulas = _extract_res(data).get("rec_formula", [])
-            if isinstance(formulas, str):
-                formulas = [formulas]
-            text_parts.append("\n\n".join(f"$$\n{f}\n$$" for f in formulas))
-        except Exception:
-            pass
-    combined_text = "\n\n---\n\n".join(text_parts)
     combined_json = "[\n" + ",\n".join(p for p in json_parts if p) + "\n]"
-    return combined_text, combined_json, "markdown"
+    return combined_json, "json"
 
 
 def run_chart(pipeline, input_path: str, work_dir: Path):
@@ -461,21 +437,15 @@ def run_chart(pipeline, input_path: str, work_dir: Path):
             "Crop the chart out of the PDF first, or use Document Parser on the whole page."
         )
     outputs = pipeline.predict(input={"image": input_path}, batch_size=1)
-    text_parts, json_parts = [], []
+    json_parts = []
     for i, res in enumerate(outputs):
         page_dir = work_dir / f"page_{i:03d}"
         page_dir.mkdir(exist_ok=True)
         res.save_to_json(save_path=str(page_dir / "res.json"))
         raw_json = _read_first_matching(page_dir, ".json")
         json_parts.append(raw_json)
-        try:
-            data = json.loads(raw_json)
-            text_parts.append(_extract_res(data).get("result", ""))
-        except Exception:
-            pass
-    combined_text = "\n\n".join(text_parts)
     combined_json = "[\n" + ",\n".join(p for p in json_parts if p) + "\n]"
-    return combined_text, combined_json, "text"
+    return combined_json, "json"
 
 
 # doc_parser intentionally omitted: it's dispatched to DocParserWorker
@@ -517,12 +487,12 @@ def process_file(file, data_choice, pipeline_label, device):
     status_lines = [f"Running {pipeline_label} on {original_name}..."]
 
     try:
-        output_text, output_json, output_format = run_pipeline_with_recovery(
+        output_json, output_format = run_pipeline_with_recovery(
             pipeline_key, device, str(stored_original), work_dir
         )
 
-        output_path = work_dir / "result.md"
-        output_path.write_text(output_text, encoding="utf-8")
+        output_path = work_dir / "result.json"
+        output_path.write_text(output_json, encoding="utf-8")
         json_path = work_dir / "result_raw.json"
         json_path.write_text(output_json, encoding="utf-8")
 
@@ -555,7 +525,7 @@ def process_file(file, data_choice, pipeline_label, device):
         }
         records = add_record(record)
         status_lines.append(f"Error: {e}")
-        output_text = ""
+        output_json = ""
 
     choices = library_choices(records)
     is_image = Path(stored_original).suffix.lower() in IMAGE_EXTS
@@ -567,7 +537,7 @@ def process_file(file, data_choice, pipeline_label, device):
         gr.update(choices=choices, value=record_id),
         preview_update,
         file_update,
-        output_text,
+        output_json,
     )
 
 
@@ -589,25 +559,51 @@ def load_from_library(record_id):
             gr.update(value=original if not is_image else None, visible=not is_image),
         )
 
-    output_text = Path(record["output_path"]).read_text(encoding="utf-8", errors="replace")
+    output_path = Path(record["output_path"])
+     
+    # Handle backward compatibility: if .json doesn't exist, try .md
+    if not output_path.exists():
+        md_path = output_path.parent / "result.md"
+        if md_path.exists():
+            # Convert old markdown records to JSON format
+            output_path = md_path
+            # Update record to point to new format
+            record["output_path"] = str(md_path)
+            update_record(record_id, output_path=str(md_path))
+    
+    if not output_path.exists():
+        return f"Output file not found: {output_path}", gr.update(value=None, visible=False), gr.update(value=None, visible=True)
+    
+    content = output_path.read_text(encoding="utf-8", errors="replace")
+    
+    # If it's an old .md file, wrap it in a simple JSON structure for the editor
+    if output_path.suffix == ".md":
+        content = json.dumps({"markdown": content, "legacy_format": True})
     original = record["original_path"]
     is_image = Path(original).suffix.lower() in IMAGE_EXTS
 
     return (
-        output_text,
+        content,
         gr.update(value=original if is_image else None, visible=is_image),
         gr.update(value=original if not is_image else None, visible=not is_image),
     )
 
 
-def save_edit(record_id, edited_text):
+def save_edit(record_id, edited_json):
     if not record_id:
-        return "Nothing selected to save.", edited_text
+        return "Nothing selected to save.", edited_json
     record = find_record(record_id)
     if record is None or record.get("output_path") is None:
-        return "This entry has no output file to save to.", edited_text
-    Path(record["output_path"]).write_text(edited_text, encoding="utf-8")
-    return f"Saved changes to {Path(record['output_path']).name}.", edited_text
+        return "This entry has no output file to save to.", edited_json
+    
+    # Validate JSON before saving
+    try:
+        json.loads(edited_json)
+    except json.JSONDecodeError as e:
+        return f"Invalid JSON: {e}", edited_json
+    
+    Path(record["output_path"]).write_text(edited_json, encoding="utf-8")
+    return f"Saved changes to {Path(record['output_path']).name}.", edited_json
 
 
 def refresh_library():
@@ -624,7 +620,6 @@ def refresh_library():
 QUILL_HEAD = """
 <link href="https://cdn.jsdelivr.net/npm/quill@2.0.3/dist/quill.bubble.css" rel="stylesheet">
 <script src="https://cdn.jsdelivr.net/npm/quill@2.0.3/dist/quill.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/marked@12.0.2/marked.min.js"></script>
 <style>
   #quill-editor-wrap { border: 1px solid var(--border-color-primary, #444); border-radius: 8px; }
   /* quill_hidden_content is a bridge component only -- it must stay
@@ -637,7 +632,211 @@ QUILL_HEAD = """
   .ql-editor { min-height: 560px; font-size: 15px; line-height: 1.6; }
   .ql-editor table { border-collapse: collapse; }
   .ql-editor table td, .ql-editor table th { border: 1px solid #999; padding: 4px 8px; }
+  .ql-editor .formula { background: #f5f5f5; padding: 10px; margin: 10px 0; border-radius: 4px; font-family: 'Courier New', monospace; }
+  .ql-editor pre { background: #f5f5f5; padding: 10px; margin: 10px 0; border-radius: 4px; overflow-x: auto; }
+  .ql-editor .page-separator { border: none; border-top: 2px dashed #ccc; margin: 20px 0; }
 </style>
+<script>
+function escapeHtml(text) {
+  const div = document.createElement('div');
+  div.textContent = text;
+  return div.innerHTML;
+}
+
+function jsonToHtml(jsonData) { 
+  console.log('[jsonToHtml] Input type:', typeof jsonData);
+  console.log('[jsonToHtml] Input length:', typeof jsonData === 'string' ? jsonData.length : 'N/A');
+  console.log('[jsonToHtml] Input preview:', typeof jsonData === 'string' ? jsonData.substring(0, 200) : JSON.stringify(jsonData).substring(0, 200));
+ 
+  try {
+    const data = typeof jsonData === 'string' ? JSON.parse(jsonData) : jsonData;
+     console.log('[jsonToHtml] Parsed data type:', Array.isArray(data) ? 'array' : typeof data);
+
+    // Handle array of page results
+    if (Array.isArray(data)) {
+      console.log('[jsonToHtml] Processing array with', data.length, 'pages');
+      return data.map(page => convertPageToHtml(page)).join('<hr class="page-separator">');
+    }
+    
+    // Handle single page/result
+    console.log('[jsonToHtml] Processing single page');
+    return convertPageToHtml(data);
+  } catch (e) {
+    console.error('[jsonToHtml] Error parsing JSON:', e);
+    return `<pre style="color: red;">Error parsing JSON: ${escapeHtml(e.message)}<br><br>Raw content:<br>${escapeHtml(typeof jsonData === 'string' ? jsonData : JSON.stringify(jsonData))}</pre>`;
+  }
+}
+
+function convertPageToHtml(pageData) {
+  console.log('[convertPageToHtml] Input pageData:', JSON.stringify(pageData).substring(0, 300));
+  
+  // Handle legacy markdown format
+  if (pageData.markdown && pageData.legacy_format) {
+    console.log('[convertPageToHtml] Found legacy markdown format');
+    return `<pre>${escapeHtml(pageData.markdown)}</pre>`;
+  }
+
+  const res = pageData.res || pageData;
+  console.log('[convertPageToHtml] Extracted res:', JSON.stringify(res).substring(0, 300));
+  console.log('[convertPageToHtml] All keys in res:', Object.keys(res));
+   
+  // Log nested structures for debugging
+  if (res.layout_dets) console.log('[convertPageToHtml] layout_dets type:', typeof res.layout_dets, 'isArray:', Array.isArray(res.layout_dets));
+  if (res.cells) console.log('[convertPageToHtml] cells type:', typeof res.cells, 'isArray:', Array.isArray(res.cells));
+  if (res.poly) console.log('[convertPageToHtml] poly type:', typeof res.poly, 'isArray:', Array.isArray(res.poly));
+  if (res.rec_texts) console.log('[convertPageToHtml] rec_texts type:', typeof res.rec_texts, 'isArray:', Array.isArray(res.rec_texts));
+  if (res.html) console.log('[convertPageToHtml] html type:', typeof res.html);
+  if (res.rec_formula) console.log('[convertPageToHtml] rec_formula type:', typeof res.rec_formula);
+  if (res.result) console.log('[convertPageToHtml] result type:', typeof res.result);
+  if (res.parsing_res_list) console.log('[convertPageToHtml] parsing_res_list type:', typeof res.parsing_res_list, 'isArray:', Array.isArray(res.parsing_res_list));
+  if (res.layout_det_res) console.log('[convertPageToHtml] layout_det_res type:', typeof res.layout_det_res);
+
+  let html = '';
+  
+  // OCR: rec_texts array
+  if (res.rec_texts && Array.isArray(res.rec_texts)) { 
+    console.log('[convertPageToHtml] Found rec_texts with', res.rec_texts.length, 'items');
+    html += res.rec_texts.map(text => `<p>${escapeHtml(text)}</p>`).join('');
+  }
+  
+  // Table: HTML content
+  if (res.html) {
+    console.log('[convertPageToHtml] Found html content');
+    html += res.html;
+  }
+  
+  // Formula: rec_formula array
+  if (res.rec_formula) {
+    const formulas = Array.isArray(res.rec_formula) ? res.rec_formula : [res.rec_formula];
+    console.log('[convertPageToHtml] Found rec_formula with', formulas.length, 'items');
+    html += formulas.map(f => `<div class="formula">$$${escapeHtml(f)}$$</div>`).join('');
+  }
+  
+  // Chart: result data
+  if (res.result && typeof res.result === 'string') {
+    console.log('[convertPageToHtml] Found result string');
+    html += `<pre>${escapeHtml(res.result)}</pre>`;
+  }
+
+   // Doc Parser: layout_dets (layout detections)
+    if (res.layout_dets && Array.isArray(res.layout_dets)) {
+      console.log('[convertPageToHtml] Found layout_dets with', res.layout_dets.length, 'items');
+      html += res.layout_dets.map(det => {
+        if (det.text) {
+          return `<p>${escapeHtml(det.text)}</p>`;
+        }
+        return '';
+      }).join('');
+    }
+   
+    // Doc Parser: cells (table cells)
+    if (res.cells && Array.isArray(res.cells)) {
+      console.log('[convertPageToHtml] Found cells with', res.cells.length, 'items');
+      html += '<table border="1" style="border-collapse: collapse; margin: 10px 0;">';
+      res.cells.forEach(cell => {
+        html += `<tr><td style="border: 1px solid #ccc; padding: 8px;">${escapeHtml(cell.text || JSON.stringify(cell))}</td></tr>`;
+      });
+      html += '</table>';
+    }
+   
+    // Doc Parser: poly (text blocks with bbox)
+    if (res.poly && Array.isArray(res.poly)) {
+      console.log('[convertPageToHtml] Found poly with', res.poly.length, 'items');
+      html += res.poly.map(p => {
+        if (p.text || p.rec_texts) {
+          const text = p.text || (Array.isArray(p.rec_texts) ? p.rec_texts.join(' ') : '');
+          return `<p>${escapeHtml(text)}</p>`;
+        }
+        return '';
+      }).join('');
+    }
+    
+    // Doc Parser: parsing_res_list (parsing results)
+    if (res.parsing_res_list && Array.isArray(res.parsing_res_list)) {
+      console.log('[convertPageToHtml] Found parsing_res_list with', res.parsing_res_list.length, 'items');
+      console.log('[convertPageToHtml] First parsing_res_list item:', JSON.stringify(res.parsing_res_list[0]).substring(0, 300));
+      html += res.parsing_res_list.map(item => { 
+        console.log('[convertPageToHtml] Processing parsing_res_list item keys:', Object.keys(item));
+        if (item.text) {
+          return `<p>${escapeHtml(item.text)}</p>`;
+        }
+        if (item.rec_texts && Array.isArray(item.rec_texts)) {
+          return item.rec_texts.map(text => `<p>${escapeHtml(text)}</p>`).join('');
+        }
+        if (item.content) {
+          return `<p>${escapeHtml(item.content)}</p>`;
+        }
+        if (item.block_content) {
+          // Use block_label to determine formatting
+          const label = item.block_label || '';
+          const content = item.block_content;
+          
+          // Handle different block types
+          if (label === 'title' || label === 'header' || label === 'paragraph_title') {
+            return `<h2>${escapeHtml(content)}</h2>`;
+          } else if (label === 'text' || label === 'paragraph') {
+            return `<p>${escapeHtml(content)}</p>`;
+          } else if (label === 'table' || label === 'table_body') {
+            // For tables, render the HTML directly if it contains table tags
+            if (content.includes('<table') || content.includes('<tr') || content.includes('<td')) {
+              // Convert newlines to breaks within table cells
+              return content.replace(/\\n/g, '<br>').replace(/\n/g, '<br>');
+            }
+            return `<p>${escapeHtml(content)}</p>`;
+          } else if (label === 'list') {
+            return `<li>${escapeHtml(content)}</li>`;
+          } else if (label === 'number') {
+            return `<span>${escapeHtml(content)}</span>`;
+          } else if (label === 'header_image') {
+            return `<p><em>[Image: ${escapeHtml(content)}]</em></p>`;
+          } else if (label === 'footer') {
+            return `<p><small>${escapeHtml(content)}</small></p>`;
+          } else {
+            // Default to paragraph for unknown types
+            return `<p>${escapeHtml(content)}</p>`;
+          }
+        }
+        if (item.html) {
+          return item.html;
+        }
+        return '';
+      }).join('');
+    }
+     
+    // Doc Parser: layout_det_res (layout detection results)
+    if (res.layout_det_res) {
+      console.log('[convertPageToHtml] Found layout_det_res');
+        if (Array.isArray(res.layout_det_res)) {
+          html += res.layout_det_res.map(det => {
+            if (det.text) {
+              return `<p>${escapeHtml(det.text)}</p>`;
+            }
+            return '';
+          }).join('');
+        } else if (typeof res.layout_det_res === 'object') {
+          // Handle nested structure
+          Object.values(res.layout_det_res).forEach(det => {
+            if (Array.isArray(det)) {
+              html += det.map(d => {
+                if (d.text) return `<p>${escapeHtml(d.text)}</p>`;
+                return '';
+              }).join('');
+            }
+          });
+        }
+      }
+
+  // Fallback: pretty-print the JSON
+  if (!html) {
+    console.log('[convertPageToHtml] No content found, using fallback');
+    html += `<pre>${JSON.stringify(res, null, 2)}</pre>`;
+  }
+
+  console.log('[convertPageToHtml] Generated HTML length:', html.length);
+  console.log('[convertPageToHtml] Generated HTML preview:', html.substring(0, 200));
+  return html;
+}
+</script>
 """
 
 # Mounts Quill on page load. Retries until the CDN script (and the
@@ -647,15 +846,20 @@ _QUILL_INIT_JS = """
 () => {
   function initQuill() {
     const target = document.getElementById('quill-editor');
+    console.log('[QUILL_INIT] Looking for quill-editor element:', target);
+    console.log('[QUILL_INIT] Quill available:', typeof Quill !== 'undefined');
     if (!target || typeof Quill === 'undefined') {
+      console.log('[QUILL_INIT] Retrying in 200ms...');
       setTimeout(initQuill, 200);
       return;
     }
-    if (window.quillEditor) return;
-
-    if (typeof marked !== 'undefined') {
-      marked.setOptions({ breaks: true, gfm: true });
+    
+    if (window.quillEditor) {
+      console.log('[QUILL_INIT] Quill already initialized');
+      return;
     }
+ 
+    console.log('[QUILL_INIT] Initializing Quill editor');
 
     window.quillEditor = new Quill('#quill-editor', {
       theme: 'bubble',
@@ -671,6 +875,9 @@ _QUILL_INIT_JS = """
         ]
       }
     });
+    console.log('[QUILL_INIT] Quill initialized successfully');
+    console.log('[QUILL_INIT] Editor root element:', window.quillEditor.root);
+    console.log('[QUILL_INIT] Editor root HTML:', window.quillEditor.root.innerHTML);
 
     // Every keystroke/format change mirrors into the hidden textbox so
     // Python can read it (e.g. on Save).
@@ -687,13 +894,9 @@ _QUILL_INIT_JS = """
 """
 
 # Pulls whatever Python just wrote into the hidden textbox and pushes it
-# INTO the Quill editor, running it through `marked` first so Markdown
-# and plain-text pipeline output (OCR, formula, doc_parser) actually
-# render -- not just show up as literal "# Heading" text. Pipelines that
-# already emit HTML (table_recognition_v2) pass through marked mostly
-# unchanged, since marked leaves well-formed raw HTML blocks alone.
-# Chain this with .then() right after any event that updates
-# quill_hidden from the backend (process_file, load_from_library).
+# INTO the Quill editor, running it through jsonToHtml to convert JSON
+# to HTML for display. Chain this with .then() right after any event that
+# updates quill_hidden from the backend (process_file, load_from_library).
 _PUSH_INTO_QUILL_JS = """
 () => {
   const hidden = document.querySelector('#quill_hidden_content textarea');
@@ -706,8 +909,24 @@ _PUSH_INTO_QUILL_JS = """
     return;
   }
   const raw = hidden.value || '';
-  const html = (typeof marked !== 'undefined') ? marked.parse(raw) : raw;
-  window.quillEditor.root.innerHTML = html;
+  console.log('[PUSH_INTO_QUILL] Hidden textarea found:', hidden);
+  console.log('[PUSH_INTO_QUILL] Hidden textarea value length:', raw.length);
+  console.log('[PUSH_INTO_QUILL] Hidden textarea value preview:', raw.substring(0, 200));
+  console.log('[PUSH_INTO_QUILL] Hidden textarea value empty:', raw.length === 0);
+  console.log('[PUSH_INTO_QUILL] jsonToHtml available:', typeof jsonToHtml !== 'undefined');
+   
+   if (raw.length === 0) {
+      console.warn('[PUSH_INTO_QUILL] Hidden textarea is empty - nothing to push');
+      return;
+    }
+   
+  const html = (typeof jsonToHtml !== 'undefined') ? jsonToHtml(raw) : raw;
+  console.log('[PUSH_INTO_QUILL] Generated HTML length:', html.length);
+  console.log('[PUSH_INTO_QUILL] Generated HTML preview:', html.substring(0, 200));
+  console.log('[PUSH_INTO_QUILL] Setting editor innerHTML');
+  
+  window.quillEditor.root.innerHTML = html; 
+  console.log('[PUSH_INTO_QUILL] Editor innerHTML after set:', window.quillEditor.root.innerHTML.substring(0, 200));
 }
 """
 
