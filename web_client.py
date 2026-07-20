@@ -656,7 +656,10 @@ EDITOR_HEAD = """
   }
   .ce-popover-item:hover:not(.ce-popover-item--no-hover) {
     background-color: #80808f;
-}
+  }
+  .codex-editor ::selection {
+    background-color: var(--editorjs-dark-block-selected-background, #896755);
+  }
 </style>
 <script>
 window.escapeHtml = function(text) {
