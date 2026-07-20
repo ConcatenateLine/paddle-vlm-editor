@@ -65,22 +65,17 @@ Notes
   show up in the "Pick from /mnt/data" dropdown, so you don't have to
   re-upload large PDFs through the browser each time.
 
-- EDITOR: the "Edit" tab uses Quill (bubble theme) loaded from a CDN for
-  a distraction-free editor whose toolbar only appears inline, over a
-  text selection. Gradio has no native rich-text component, so a plain
-  <div id="quill-editor"> is injected via gr.HTML, Quill mounts onto it
-  client-side, and a hidden gr.Textbox (#quill_hidden_content) is used
-  as the bridge back to Python: JS snippets attached to existing events
-  push/pull the editor's HTML into/out of that hidden textbox. See the
-  QUILL_HEAD / _push_into_quill_js / _pull_from_quill_js constants below.
+- EDITOR: the "Edit" tab uses Editor.js loaded from a CDN for
+  a block-based editor with JSON output. Gradio has no native rich-text 
+  component, so a plain <div id="editorjs"> is injected via gr.HTML, Editor.js 
+  mounts onto it client-side, and a hidden gr.Textbox (#editorjs_hidden_content) 
+  is used as the bridge back to Python: JS snippets attached to existing events
+  push/pull the editor's JSON into/out of that hidden textbox. See the
+  EDITOR_HEAD / _push_into_editorjs_js / _pull_from_editorjs_js constants below.
 
-  Caveat: Quill works with HTML (via a Delta model), not Markdown. What
-  you save from the Edit tab is HTML, even for pipelines whose output
-  started as Markdown/plain text (OCR, formula, doc_parser). That's fine
-  as long as you're OK with result.md holding HTML after an edit+save
-  round trip. If you need real Markdown round-tripping, convert at the
-  JS boundary (e.g. with a small client-side markdown<->HTML library
-  like `marked` + `turndown`) or in Python on save.
+  Editor.js works with block-based JSON, not HTML. What you save from the 
+  Edit tab is Editor.js JSON format, which preserves the structure better 
+  than HTML. The original pipeline JSON is still available in result_raw.json.
 """
 
 import json
@@ -602,6 +597,8 @@ def save_edit(record_id, edited_json):
     except json.JSONDecodeError as e:
         return f"Invalid JSON: {e}", edited_json
     
+    # Editor.js saves data in its own JSON format, which we preserve
+    # The original pipeline JSON is still available in result_raw.json
     Path(record["output_path"]).write_text(edited_json, encoding="utf-8")
     return f"Saved changes to {Path(record['output_path']).name}.", edited_json
 
@@ -612,33 +609,28 @@ def refresh_library():
 
 
 # ---------------------------------------------------------------------------
-# Quill (bubble theme) wiring
+# Editor.js wiring
 # ---------------------------------------------------------------------------
 # Loaded once into <head> so the library is available before any of our
-# JS snippets run. Bubble theme == the "inline toolbar" you asked for: no
-# fixed toolbar row, it floats over the current text selection instead.
-QUILL_HEAD = """
-<link href="https://cdn.jsdelivr.net/npm/quill@2.0.3/dist/quill.bubble.css" rel="stylesheet">
-<script src="https://cdn.jsdelivr.net/npm/quill@2.0.3/dist/quill.js"></script>
+# JS snippets run. Editor.js uses block-based JSON output instead of HTML.
+EDITOR_HEAD = """
+<script src="https://cdn.jsdelivr.net/npm/@editorjs/editorjs@latest"></script>
+<script src="https://cdn.jsdelivr.net/npm/@editorjs/header@latest"></script>
+<script src="https://cdn.jsdelivr.net/npm/@editorjs/list@latest"></script>
+<script src="https://cdn.jsdelivr.net/npm/@editorjs/code@latest"></script>
+<script src="https://cdn.jsdelivr.net/npm/@editorjs/quote@latest"></script>
+<script src="https://cdn.jsdelivr.net/npm/@editorjs/delimiter@latest"></script>
 <style>
-  #quill-editor-wrap { border: 1px solid var(--border-color-primary, #444); border-radius: 8px; }
-  /* quill_hidden_content is a bridge component only -- it must stay
+  #editorjs-editor-wrap { border: 1px solid var(--border-color-primary, #444); border-radius: 8px; }
+  /* editorjs_hidden_content is a bridge component only -- it must stay
      mounted in the DOM for the JS push/pull snippets to find it, so we
      hide it with CSS rather than Gradio's visible=False (which can
      conditionally unmount the component instead of just hiding it,
      silently breaking the bridge). */
-  #quill_hidden_content { display: none !important; }
-  #quill-editor { min-height: 560px; background: var(--background-fill-primary, #fff); }
-  .ql-editor { min-height: 560px; font-size: 15px; line-height: 1.6; }
-  .ql-editor table { border-collapse: collapse; width: 100%; margin: 10px 0; }
-  .ql-editor table td, .ql-editor table th { border: 1px solid #999; padding: 8px 12px; text-align: left; }
-  .ql-editor table th { background: #f0f0f0; font-weight: bold; }
-  .ql-editor table tr:nth-child(even) { background: #f9f9f9; }
-  .ql-editor .formula { background: #f5f5f5; padding: 10px; margin: 10px 0; border-radius: 4px; font-family: 'Courier New', monospace; }
-  .ql-editor pre { background: #f5f5f5; padding: 10px; margin: 10px 0; border-radius: 4px; overflow-x: auto; }
-  .ql-editor .page-separator { border: none; border-top: 2px dashed #ccc; margin: 20px 0; }
-  .ql-editor .table-container { overflow-x: auto; margin: 10px 0; }
-  .ql-editor .table-container table { min-width: 100%; }
+  #editorjs_hidden_content { display: none !important; }
+  #editorjs { min-height: 560px; background: var(--background-fill-primary, #fff); padding: 20px; }
+  .ce-block__content { font-size: 15px; line-height: 1.6; }
+  .ce-toolbar__content { max-width: 100%; }
 </style>
 <script>
 window.escapeHtml = function(text) {
@@ -647,41 +639,78 @@ window.escapeHtml = function(text) {
   return div.innerHTML;
 };
 
-window.jsonToHtml = function(jsonData) {
+window.jsonToEditorJs = function(jsonData) {
   try {
     const data = typeof jsonData === 'string' ? JSON.parse(jsonData) : jsonData;
+    const blocks = [];
+    
+    if (data.markdown && data.legacy_format) {
+      blocks.push({
+        type: 'paragraph',
+        data: {
+          text: data.markdown
+        }
+      });
+      return JSON.stringify({ blocks: blocks, version: '2.28.0' });
+    }
     
     if (Array.isArray(data)) {
-      return data.map(function(page) {
+      data.forEach(function(page) {
         if (page.parsing_res_list && Array.isArray(page.parsing_res_list)) {
-          return page.parsing_res_list.map(window.convertBlockToHtml).join('');
+          page.parsing_res_list.forEach(function(block) {
+            window.convertBlockToEditorJs(block, blocks);
+          });
+        } else {
+          window.convertPageToEditorJs(page, blocks);
         }
-        return window.convertPageToHtml(page);
-      }).join('<hr class="page-separator">');
+        blocks.push({ type: 'delimiter' });
+      });
+    } else if (data.parsing_res_list && Array.isArray(data.parsing_res_list)) {
+      data.parsing_res_list.forEach(function(block) {
+        window.convertBlockToEditorJs(block, blocks);
+      });
+    } else {
+      window.convertPageToEditorJs(data, blocks);
     }
     
-    if (data.parsing_res_list && Array.isArray(data.parsing_res_list)) {
-      return data.parsing_res_list.map(window.convertBlockToHtml).join('');
-    }
-    
-    return window.convertPageToHtml(data);
+    return JSON.stringify({ blocks: blocks, version: '2.28.0' });
   } catch (e) {
-    console.error('[jsonToHtml] Error:', e);
-    return '<pre style="color: red;">Error parsing JSON: ' + window.escapeHtml(e.message) + '</pre>';
+    console.error('[jsonToEditorJs] Error:', e);
+    return JSON.stringify({
+      blocks: [{
+        type: 'paragraph',
+        data: { text: 'Error parsing JSON: ' + e.message }
+      }],
+      version: '2.28.0'
+    });
   }
 };
 
-window.convertBlockToHtml = function(block) {
+window.convertBlockToEditorJs = function(block, blocks) {
   if (block.text) {
-    return '<p>' + window.escapeHtml(block.text) + '</p>';
+    blocks.push({
+      type: 'paragraph',
+      data: { text: block.text }
+    });
+    return;
   }
   
   if (block.rec_texts && Array.isArray(block.rec_texts)) {
-    return block.rec_texts.map(function(t) { return '<p>' + window.escapeHtml(t) + '</p>'; }).join('');
+    block.rec_texts.forEach(function(t) {
+      blocks.push({
+        type: 'paragraph',
+        data: { text: t }
+      });
+    });
+    return;
   }
   
   if (block.content) {
-    return '<p>' + window.escapeHtml(block.content) + '</p>';
+    blocks.push({
+      type: 'paragraph',
+      data: { text: block.content }
+    });
+    return;
   }
   
   if (block.block_content) {
@@ -689,191 +718,276 @@ window.convertBlockToHtml = function(block) {
     const content = block.block_content;
     
     if (label === 'title' || label === 'header' || label === 'paragraph_title') {
-      return '<h2>' + window.escapeHtml(content) + '</h2>';
-    }
-    if (label === 'text' || label === 'paragraph') {
-      return '<p>' + window.escapeHtml(content) + '</p>';
-    }
-    if (label === 'table' || label === 'table_body') {
-      console.log('[convertBlockToHtml] Table block content length:', content.length);
-      console.log('[convertBlockToHtml] Table block content preview:', content.substring(0, 500));
+      blocks.push({
+        type: 'header',
+        data: { text: content, level: 2 }
+      });
+    } else if (label === 'text' || label === 'paragraph') {
+      blocks.push({
+        type: 'paragraph',
+        data: { text: content }
+      });
+    } else if (label === 'table' || label === 'table_body') {
       if (content.indexOf('<table') >= 0 || content.indexOf('<tr') >= 0 || content.indexOf('<td') >= 0) {
-        return content;
+        blocks.push({
+          type: 'paragraph',
+          data: { text: content }
+        });
+      } else {
+        blocks.push({
+          type: 'paragraph',
+          data: { text: content }
+        });
       }
-      return '<div class="table-container">' + window.escapeHtml(content) + '</div>';
-    }
-    if (label === 'list') {
-      return '<li>' + window.escapeHtml(content) + '</li>';
-    }
-    if (label === 'number') {
-      return '<span>' + window.escapeHtml(content) + '</span>';
-    }
-    if (label === 'header_image') {
+    } else if (label === 'list') {
+      blocks.push({
+        type: 'list',
+        data: { style: 'unordered', items: [content] }
+      });
+    } else if (label === 'number') {
+      blocks.push({
+        type: 'list',
+        data: { style: 'ordered', items: [content] }
+      });
+    } else if (label === 'header_image') {
       if (content && content.trim()) {
-        return '<p><em>[Image: ' + window.escapeHtml(content) + ']</em></p>';
+        blocks.push({
+          type: 'paragraph',
+          data: { text: '[Image: ' + content + ']' }
+        });
       }
-      return '';
+    } else if (label === 'footer') {
+      blocks.push({
+        type: 'paragraph',
+        data: { text: content }
+      });
+    } else if (label === 'formula') {
+      blocks.push({
+        type: 'paragraph',
+        data: { text: '$$' + content + '$$' }
+      });
+    } else if (label === 'code') {
+      blocks.push({
+        type: 'code',
+        data: { code: content }
+      });
+    } else if (label === 'blockquote') {
+      blocks.push({
+        type: 'quote',
+        data: { text: content, caption: '', alignment: 'left' }
+      });
+    } else {
+      blocks.push({
+        type: 'paragraph',
+        data: { text: content }
+      });
     }
-    if (label === 'footer') {
-      return '<p><small>' + window.escapeHtml(content) + '</small></p>';
-    }
-    if (label === 'formula') {
-      return '<div class="formula">$$' + window.escapeHtml(content) + '$$</div>';
-    }
-    if (label === 'code') {
-      return '<pre><code>' + window.escapeHtml(content) + '</code></pre>';
-    }
-    if (label === 'blockquote') {
-      return '<blockquote>' + window.escapeHtml(content) + '</blockquote>';
-    }
-    
-    return '<p>' + window.escapeHtml(content) + '</p>';
+    return;
   }
   
   if (block.html) {
-    return block.html;
+    blocks.push({
+      type: 'paragraph',
+      data: { text: block.html }
+    });
+    return;
   }
   
-  return '<pre>' + JSON.stringify(block, null, 2) + '</pre>';
+  blocks.push({
+    type: 'code',
+    data: { code: JSON.stringify(block, null, 2) }
+  });
 };
 
-window.convertPageToHtml = function(pageData) {
-  if (pageData.markdown && pageData.legacy_format) {
-    return '<pre>' + window.escapeHtml(pageData.markdown) + '</pre>';
-  }
-
+window.convertPageToEditorJs = function(pageData, blocks) {
   const res = pageData.res || pageData;
-  let html = '';
   
   if (res.rec_texts && Array.isArray(res.rec_texts)) {
-    html += res.rec_texts.map(function(t) { return '<p>' + window.escapeHtml(t) + '</p>'; }).join('');
+    res.rec_texts.forEach(function(t) {
+      blocks.push({
+        type: 'paragraph',
+        data: { text: t }
+      });
+    });
   }
   
   if (res.html) {
-    html += res.html;
+    blocks.push({
+      type: 'paragraph',
+      data: { text: res.html }
+    });
   }
   
   if (res.rec_formula) {
     const formulas = Array.isArray(res.rec_formula) ? res.rec_formula : [res.rec_formula];
-    html += formulas.map(function(f) { return '<div class="formula">$$' + window.escapeHtml(f) + '$$</div>'; }).join('');
+    formulas.forEach(function(f) {
+      blocks.push({
+        type: 'paragraph',
+        data: { text: '$$' + f + '$$' }
+      });
+    });
   }
   
   if (res.result && typeof res.result === 'string') {
-    html += '<pre>' + window.escapeHtml(res.result) + '</pre>';
+    blocks.push({
+      type: 'code',
+      data: { code: res.result }
+    });
   }
 
   if (res.parsing_res_list && Array.isArray(res.parsing_res_list)) {
-    html += res.parsing_res_list.map(window.convertBlockToHtml).join('');
+    res.parsing_res_list.forEach(function(block) {
+      window.convertBlockToEditorJs(block, blocks);
+    });
   }
   
-  if (!html) {
-    html = '<pre>' + JSON.stringify(res, null, 2) + '</pre>';
+  if (blocks.length === 0) {
+    blocks.push({
+      type: 'code',
+      data: { code: JSON.stringify(res, null, 2) }
+    });
   }
-
-  return html;
 };
 </script>
 """
 
-# Mounts Quill on page load. Retries until the CDN script (and the
+# Mounts Editor.js on page load. Retries until the CDN script (and the
 # gr.HTML div it targets) actually exist in the DOM, since Gradio renders
 # client-side and there's no guaranteed ordering against the CDN <script>.
-_QUILL_INIT_JS = """
+_EDITORJS_INIT_JS = """
 () => {
-  function initQuill() {
-    const target = document.getElementById('quill-editor');
-    console.log('[QUILL_INIT] Looking for quill-editor element:', target);
-    console.log('[QUILL_INIT] Quill available:', typeof Quill !== 'undefined');
-    if (!target || typeof Quill === 'undefined') {
-      console.log('[QUILL_INIT] Retrying in 200ms...');
-      setTimeout(initQuill, 200);
+  function initEditorJs() {
+    const target = document.getElementById('editorjs');
+    console.log('[EDITORJS_INIT] Looking for editorjs element:', target);
+    console.log('[EDITORJS_INIT] EditorJS available:', typeof EditorJS !== 'undefined');
+    if (!target || typeof EditorJS === 'undefined') {
+      console.log('[EDITORJS_INIT] Retrying in 200ms...');
+      setTimeout(initEditorJs, 200);
       return;
     }
     
-    if (window.quillEditor) {
-      console.log('[QUILL_INIT] Quill already initialized');
+    if (window.editorjsEditor) {
+      console.log('[EDITORJS_INIT] Editor.js already initialized');
       return;
     }
  
-    console.log('[QUILL_INIT] Initializing Quill editor');
+    console.log('[EDITORJS_INIT] Initializing Editor.js');
+    console.log('[EDITORJS_INIT] Available plugins:', {
+      Header: typeof window.Header,
+      List: typeof window.List,
+      CodeTool: typeof window.CodeTool,
+      Quote: typeof window.Quote,
+      Delimiter: typeof window.Delimiter
+    });
 
-    window.quillEditor = new Quill('#quill-editor', {
-      theme: 'bubble',
+    const tools = {};
+    if (typeof window.Header !== 'undefined') {
+      tools.header = {
+        class: window.Header,
+        config: {
+          levels: [1, 2, 3],
+          defaultLevel: 2
+        }
+      };
+    }
+    if (typeof window.List !== 'undefined') {
+      tools.list = {
+        class: window.List,
+        inlineToolbar: true
+      };
+    }
+    if (typeof window.CodeTool !== 'undefined') {
+      tools.code = window.CodeTool;
+    }
+    if (typeof window.Quote !== 'undefined') {
+      tools.quote = window.Quote;
+    }
+    if (typeof window.Delimiter !== 'undefined') {
+      tools.delimiter = window.Delimiter;
+    }
+
+    window.editorjsEditor = new EditorJS({
+      holder: 'editorjs',
       placeholder: 'Run a pipeline or pick a file from the workspace history to edit its output...',
-      modules: {
-        toolbar: [
-          [{ header: [1, 2, 3, false] }],
-          ['bold', 'italic', 'underline', 'strike'],
-          ['blockquote', 'code-block'],
-          [{ list: 'ordered' }, { list: 'bullet' }],
-          ['link'],
-          ['clean']
-        ]
+      tools: tools,
+      data: {
+        blocks: []
+      },
+      onChange: () => {
+        window.editorjsEditor.save().then((outputData) => {
+          const hidden = document.querySelector('#editorjs_hidden_content textarea');
+          if (hidden) {
+            hidden.value = JSON.stringify(outputData);
+            hidden.dispatchEvent(new Event('input', { bubbles: true }));
+          }
+        }).catch((error) => {
+          console.error('Saving failed: ', error);
+        });
       }
     });
-    console.log('[QUILL_INIT] Quill initialized successfully');
-    console.log('[QUILL_INIT] Editor root element:', window.quillEditor.root);
-    console.log('[QUILL_INIT] Editor root HTML:', window.quillEditor.root.innerHTML);
-
-    // Every keystroke/format change mirrors into the hidden textbox so
-    // Python can read it (e.g. on Save).
-    window.quillEditor.on('text-change', () => {
-      const hidden = document.querySelector('#quill_hidden_content textarea');
-      if (hidden) {
-        hidden.value = window.quillEditor.root.innerHTML;
-        hidden.dispatchEvent(new Event('input', { bubbles: true }));
-      }
-    });
+    console.log('[EDITORJS_INIT] Editor.js initialized successfully');
   }
-  setTimeout(initQuill, 300);
+  setTimeout(initEditorJs, 300);
 }
 """
 
 # Pulls whatever Python just wrote into the hidden textbox and pushes it
-# INTO the Quill editor, running it through jsonToHtml to convert JSON
-# to HTML for display. Chain this with .then() right after any event that
-# updates quill_hidden from the backend (process_file, load_from_library).
-_PUSH_INTO_QUILL_JS = """
+# INTO the Editor.js editor, running it through jsonToEditorJs to convert JSON
+# to Editor.js format for display. Chain this with .then() right after any event that
+# updates editorjs_hidden from the backend (process_file, load_from_library).
+_PUSH_INTO_EDITORJS_JS = """
 () => {
-  const hidden = document.querySelector('#quill_hidden_content textarea');
+  const hidden = document.querySelector('#editorjs_hidden_content textarea');
   if (!hidden) {
-    console.warn('[quill bridge] hidden textarea (#quill_hidden_content) not found in DOM');
+    console.warn('[editorjs bridge] hidden textarea (#editorjs_hidden_content) not found in DOM');
     return;
   }
-  if (!window.quillEditor) {
-    console.warn('[quill bridge] quillEditor not initialized yet');
+  if (!window.editorjsEditor) {
+    console.warn('[editorjs bridge] editorjsEditor not initialized yet');
     return;
   }
   const raw = hidden.value || '';
-  console.log('[PUSH_INTO_QUILL] Hidden textarea found:', hidden);
-  console.log('[PUSH_INTO_QUILL] Hidden textarea value length:', raw.length);
-  console.log('[PUSH_INTO_QUILL] Hidden textarea value preview:', raw.substring(0, 200));
-  console.log('[PUSH_INTO_QUILL] Hidden textarea value empty:', raw.length === 0);
+  console.log('[PUSH_INTO_EDITORJS] Hidden textarea found:', hidden);
+  console.log('[PUSH_INTO_EDITORJS] Hidden textarea value length:', raw.length);
+  console.log('[PUSH_INTO_EDITORJS] Hidden textarea value preview:', raw.substring(0, 200));
+  console.log('[PUSH_INTO_EDITORJS] Hidden textarea value empty:', raw.length === 0);
    
    if (raw.length === 0) {
-      console.warn('[PUSH_INTO_QUILL] Hidden textarea is empty - nothing to push');
+      console.warn('[PUSH_INTO_EDITORJS] Hidden textarea is empty - nothing to push');
       return;
    }
    
-  const html = window.jsonToHtml ? window.jsonToHtml(raw) : raw;
-  console.log('[PUSH_INTO_QUILL] Generated HTML length:', html.length);
-  console.log('[PUSH_INTO_QUILL] Generated HTML preview:', html.substring(0, 200));
-  console.log('[PUSH_INTO_QUILL] Setting editor innerHTML');
+  const editorJsData = window.jsonToEditorJs ? window.jsonToEditorJs(raw) : raw;
+  console.log('[PUSH_INTO_EDITORJS] Generated Editor.js data length:', editorJsData.length);
+  console.log('[PUSH_INTO_EDITORJS] Generated Editor.js data preview:', editorJsData.substring(0, 200));
+  console.log('[PUSH_INTO_EDITORJS] Rendering data into editor');
   
-  window.quillEditor.root.innerHTML = html; 
-  console.log('[PUSH_INTO_QUILL] Editor innerHTML after set:', window.quillEditor.root.innerHTML.substring(0, 200));
+  try {
+    const data = typeof editorJsData === 'string' ? JSON.parse(editorJsData) : editorJsData;
+    window.editorjsEditor.render(data).then(() => {
+      console.log('[PUSH_INTO_EDITORJS] Data rendered successfully');
+    }).catch((error) => {
+      console.error('[PUSH_INTO_EDITORJS] Render failed:', error);
+    });
+  } catch (e) {
+    console.error('[PUSH_INTO_EDITORJS] JSON parse error:', e);
+  }
 }
 """
 
-# Pulls the CURRENT Quill HTML out into the hidden textbox. Run this
+# Pulls the CURRENT Editor.js data out into the hidden textbox. Run this
 # before any event that needs to read the latest edited content on the
 # Python side (e.g. Save).
-_PULL_FROM_QUILL_JS = """
+_PULL_FROM_EDITORJS_JS = """
 () => {
-  const hidden = document.querySelector('#quill_hidden_content textarea');
-  if (hidden && window.quillEditor) {
-    hidden.value = window.quillEditor.root.innerHTML;
-    hidden.dispatchEvent(new Event('input', { bubbles: true }));
+  const hidden = document.querySelector('#editorjs_hidden_content textarea');
+  if (hidden && window.editorjsEditor) {
+    window.editorjsEditor.save().then((outputData) => {
+      hidden.value = JSON.stringify(outputData);
+      hidden.dispatchEvent(new Event('input', { bubbles: true }));
+    }).catch((error) => {
+      console.error('Saving failed: ', error);
+    });
   }
 }
 """
@@ -882,7 +996,7 @@ _PULL_FROM_QUILL_JS = """
 # UI
 # ---------------------------------------------------------------------------
 def build_demo():
-    with gr.Blocks(title="PaddleOCR-VL Workspace", head=QUILL_HEAD) as demo:
+    with gr.Blocks(title="PaddleOCR-VL Workspace", head=EDITOR_HEAD) as demo:
         gr.Markdown(
             "## PaddleOCR-VL Local Workspace\n"
             "Upload a PDF or image, pick a pipeline, and edit the extracted result. "
@@ -921,17 +1035,17 @@ def build_demo():
                 file_preview = gr.File(label="Original file", visible=True)
 
             with gr.Column(scale=2):
-                # Quill renders Markdown/HTML output directly, so this one
+                # Editor.js renders JSON blocks directly, so this one
                 # pane replaces the separate Preview + Edit tabs -- what
                 # you see is what you can immediately click into and edit.
-                gr.HTML('<div id="quill-editor-wrap"><div id="quill-editor"></div></div>')
-                # Bridge only -- never shown to the user. Quill's HTML
+                gr.HTML('<div id="editorjs-editor-wrap"><div id="editorjs"></div></div>')
+                # Bridge only -- never shown to the user. Editor.js's JSON
                 # lives here so Python can read/write it.
-                quill_hidden = gr.Textbox(elem_id="quill_hidden_content", visible=True)
+                editorjs_hidden = gr.Textbox(elem_id="editorjs_hidden_content", visible=True)
                 save_button = gr.Button("Save edits")
 
-        # Mount Quill once, as soon as the page loads.
-        demo.load(fn=None, js=_QUILL_INIT_JS)
+        # Mount Editor.js once, as soon as the page loads.
+        demo.load(fn=None, js=_EDITORJS_INIT_JS)
 
         refresh_data_button.click(
             lambda: gr.update(choices=list_data_dir()), inputs=[], outputs=[data_dir_dropdown]
@@ -940,10 +1054,10 @@ def build_demo():
         run_button.click(
             process_file,
             inputs=[file_input, data_dir_dropdown, pipeline_selector, device_selector],
-            outputs=[status_box, library_dropdown, image_preview, file_preview, quill_hidden],
+            outputs=[status_box, library_dropdown, image_preview, file_preview, editorjs_hidden],
         ).then(
-            # New content just landed in the hidden textbox -- render it into Quill.
-            fn=None, js=_PUSH_INTO_QUILL_JS
+            # New content just landed in the hidden textbox -- render it into Editor.js.
+            fn=None, js=_PUSH_INTO_EDITORJS_JS
         )
 
         # Any change to the dropdown (from the user picking a past file, OR
@@ -953,19 +1067,19 @@ def build_demo():
         library_dropdown.change(
             load_from_library,
             inputs=[library_dropdown],
-            outputs=[quill_hidden, image_preview, file_preview],
+            outputs=[editorjs_hidden, image_preview, file_preview],
         ).then(
-            fn=None, js=_PUSH_INTO_QUILL_JS
+            fn=None, js=_PUSH_INTO_EDITORJS_JS
         )
         library_dropdown.change(lambda rid: rid, inputs=[library_dropdown], outputs=[current_record])
 
         save_button.click(
-            # Grab the latest Quill HTML before running the Python save.
-            fn=None, js=_PULL_FROM_QUILL_JS
+            # Grab the latest Editor.js data before running the Python save.
+            fn=None, js=_PULL_FROM_EDITORJS_JS
         ).then(
             save_edit,
-            inputs=[current_record, quill_hidden],
-            outputs=[status_box, quill_hidden],
+            inputs=[current_record, editorjs_hidden],
+            outputs=[status_box, editorjs_hidden],
         )
 
     return demo
