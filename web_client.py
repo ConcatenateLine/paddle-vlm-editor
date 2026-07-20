@@ -621,6 +621,10 @@ EDITOR_HEAD = """
 <script src="https://cdn.jsdelivr.net/npm/@editorjs/quote@latest"></script>
 <script src="https://cdn.jsdelivr.net/npm/@editorjs/delimiter@latest"></script>
 <style>
+  --editorjs-dark-background: #52525b;
+  --editorjs-dark-toolbar-blockmenu-btn-hover: ##52525b;
+  --editorjs-dark-block-selected-background: #896755;
+
   #editorjs-editor-wrap { border: 1px solid var(--border-color-primary, #444); border-radius: 8px; }
   /* editorjs_hidden_content is a bridge component only -- it must stay
      mounted in the DOM for the JS push/pull snippets to find it, so we
@@ -631,6 +635,28 @@ EDITOR_HEAD = """
   #editorjs { min-height: 560px; background: var(--background-fill-primary, #fff); padding: 20px; }
   .ce-block__content { font-size: 15px; line-height: 1.6; }
   .ce-toolbar__content { max-width: 100%; }
+  .ce-stub {
+    background: var(--editorjs-dark-background, #52525b);
+  }
+  .ce-toolbar__settings-btn:hover {
+    background: var(--editorjs-dark-toolbar-blockmenu-btn-hover, #52525b);
+  }
+  .ce-toolbar__plus:hover {
+    background-color: var(--editorjs-dark-toolbar-blockmenu-btn-hover, #52525b);
+  }
+  .ce-block--selected .ce-block__content {
+    background: var(--editorjs-dark-block-selected-background, #896755);
+    box-shadow: var(--editorjs-dark-block-selected-background, #896755) 0px 1px 4px, var(--editorjs-dark-block-selected-background, #896755) 0px 0px 0px 3px;
+  }
+  .ce-popover__container {
+    background: var(--editorjs-dark-toolbar-blockmenu-btn-hover, #52525b);
+  }
+  .cdx-search-field {
+    background: #27272a;
+  }
+  .ce-popover-item:hover:not(.ce-popover-item--no-hover) {
+    background-color: #80808f;
+}
 </style>
 <script>
 window.escapeHtml = function(text) {
