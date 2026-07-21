@@ -950,11 +950,17 @@ window.convertBlockToEditorJs = function(block, blocks) {
           trs.forEach(function(tr) {
             var cells = [];
             tr.querySelectorAll('td, th').forEach(function(cell) {
-              cells.push(cell.textContent.trim());
+              var text = cell.textContent.trim();
+              var colspan = parseInt(cell.getAttribute('colspan')) || 1;
+              cells.push(text);
+              for (var c = 1; c < colspan; c++) cells.push('');
             });
             if (cells.length > 0) rows.push(cells);
           });
           if (rows.length > 0) {
+            var maxCols = 0;
+            rows.forEach(function(r) { if (r.length > maxCols) maxCols = r.length; });
+            rows.forEach(function(r) { while (r.length < maxCols) r.push(''); });
             blocks.push({
               type: 'table',
               data: { content: rows }
