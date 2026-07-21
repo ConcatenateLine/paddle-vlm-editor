@@ -614,15 +614,28 @@ def refresh_library():
 # Loaded once into <head> so the library is available before any of our
 # JS snippets run. Editor.js uses block-based JSON output instead of HTML.
 EDITOR_HEAD = """
+<script src="https://cdn.jsdelivr.net/npm/@editorjs/table@2.4.5/dist/table.umd.min.js" defer></script>
 <script src="https://cdn.jsdelivr.net/npm/@editorjs/editorjs@latest"></script>
-<script src="https://cdn.jsdelivr.net/npm/@editorjs/header@latest"></script>
-<script src="https://cdn.jsdelivr.net/npm/@editorjs/list@latest"></script>
-<script src="https://cdn.jsdelivr.net/npm/@editorjs/code@latest"></script>
-<script src="https://cdn.jsdelivr.net/npm/@editorjs/quote@latest"></script>
-<script src="https://cdn.jsdelivr.net/npm/@editorjs/delimiter@latest"></script>
+<script src="https://cdn.jsdelivr.net/npm/@editorjs/header@latest/dist/bundle.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@editorjs/list@latest/dist/bundle.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@editorjs/code@latest/dist/bundle.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@editorjs/quote@latest/dist/bundle.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@editorjs/delimiter@latest/dist/bundle.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@editorjs/bold@latest/dist/bundle.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@editorjs/italic@latest/dist/bundle.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@editorjs/underline@latest/dist/bundle.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@editorjs/link@latest/dist/bundle.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@editorjs/marker@latest/dist/bundle.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@editorjs/table@latest/dist/table.umd.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@editorjs/simple-image@latest/dist/bundle.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@editorjs/checklist@latest/dist/bundle.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@editorjs/warning@latest/dist/bundle.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@editorjs/embed@latest/dist/bundle.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@editorjs/attaches@latest/dist/bundle.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@editorjs/raw@latest/dist/bundle.js"></script>
 <style>
   --editorjs-dark-background: #52525b;
-  --editorjs-dark-toolbar-blockmenu-btn-hover: ##52525b;
+  --editorjs-dark-toolbar-blockmenu-btn-hover: #52525b;
   --editorjs-dark-block-selected-background: #896755;
 
   #editorjs-editor-wrap { border: 1px solid var(--border-color-primary, #444); border-radius: 8px; }
@@ -660,6 +673,113 @@ EDITOR_HEAD = """
   .codex-editor ::selection {
     background-color: var(--editorjs-dark-block-selected-background, #896755);
   }
+  .tc-wrap .tc-table .tc-table--heading .tc-row:first-child {
+    background: #27272a;
+  }
+  .tc-add-column:hover, .tc-add-row:hover {
+    background-color: #52525b !important;
+  }
+  .tc-popover {
+    background: #52525b;
+  }
+  .tc-popover__item-icon {
+    background: #27272a;
+  }
+  .tc-cell--selected {
+    background: #896755;
+  }
+  .tc-toolbox--showed {
+    z-index: 3;
+  }
+
+  /* Alignment tune styles */
+  .alignment-tune {
+    width: 100%;
+  }
+
+  /* Inline toolbar styles */
+  .ce-inline-toolbar {
+    background: #27272a;
+    border: 1px solid #444;
+  }
+  .ce-inline-tool:hover {
+    background: #80808f;
+  }
+  .ce-inline-tool--active {
+    background: #896755;
+  }
+
+  /* Table styles */
+  .tc-table {
+    border-collapse: collapse;
+    width: 100%;
+  }
+  .tc-cell {
+    border: 1px solid #444;
+    padding: 8px;
+    min-width: 50px;
+  }
+  .tc-cell--selected {
+    background: #896755;
+  }
+
+  /* Warning styles */
+  .cdx-warning {
+    background: #27272a;
+    border-left: 4px solid #f59e0b;
+    padding: 16px;
+  }
+
+  /* Checklist styles */
+  .cdx-checklist__item {
+    padding: 8px 0;
+  }
+  .cdx-checklist__item--checked .cdx-checklist__item-content {
+    text-decoration: line-through;
+    opacity: 0.6;
+  }
+
+  /* Embed styles */
+  .embed-tool {
+    width: 100%;
+  }
+  .embed-tool__content {
+    width: 100%;
+    aspect-ratio: 16/9;
+  }
+
+  /* Attaches styles */
+  .cdx-attaches {
+    background: #27272a;
+    border: 1px solid #444;
+    border-radius: 8px;
+    padding: 12px;
+  }
+
+  /* Raw tool styles */
+  .raw-tool {
+    background: #1a1a1a;
+    padding: 16px;
+    border-radius: 8px;
+    font-family: monospace;
+  }
+
+  /* Marker/highlight styles */
+  .cdx-marker {
+    background: #f59e0b;
+    color: #000;
+    padding: 2px 4px;
+    border-radius: 2px;
+  }
+
+  /* Link styles */
+  .cdx-link {
+    color: #60a5fa;
+    text-decoration: underline;
+  }
+  .cdx-link:hover {
+    color: #93c5fd;
+  }
 </style>
 <script>
 window.escapeHtml = function(text) {
@@ -672,7 +792,13 @@ window.jsonToEditorJs = function(jsonData) {
   try {
     const data = typeof jsonData === 'string' ? JSON.parse(jsonData) : jsonData;
     const blocks = [];
-    
+
+    // Check if data is already in Editor.js format (has blocks array)
+    if (data.blocks && Array.isArray(data.blocks)) {
+      // Already Editor.js format - return as-is to preserve all block types
+      return JSON.stringify(data);
+    }
+
     if (data.markdown && data.legacy_format) {
       blocks.push({
         type: 'paragraph',
@@ -682,7 +808,7 @@ window.jsonToEditorJs = function(jsonData) {
       });
       return JSON.stringify({ blocks: blocks, version: '2.28.0' });
     }
-    
+
     if (Array.isArray(data)) {
       data.forEach(function(page) {
         if (page.parsing_res_list && Array.isArray(page.parsing_res_list)) {
@@ -701,7 +827,7 @@ window.jsonToEditorJs = function(jsonData) {
     } else {
       window.convertPageToEditorJs(data, blocks);
     }
-    
+
     return JSON.stringify({ blocks: blocks, version: '2.28.0' });
   } catch (e) {
     console.error('[jsonToEditorJs] Error:', e);
@@ -877,6 +1003,73 @@ window.convertPageToEditorJs = function(pageData, blocks) {
     });
   }
 };
+
+window.AlignmentTune = class AlignmentTune {
+  static get isTune() {
+    return true;
+  }
+
+  static get sanitize() {
+    return {
+      div: {
+        'data-alignment': true
+      }
+    };
+  }
+
+  constructor({ api, data, config, block }) {
+    this.api = api;
+    this.block = block;
+    this.config = config;
+    this.data = data || { alignment: 'left' };
+    this.wrapper = null;
+  }
+
+  render() {
+    const alignments = ['left', 'center', 'right'];
+
+    return alignments.map(alignment => ({
+      icon: this.getAlignIcon(alignment),
+      label: 'Align ' + alignment,
+      isActive: this.data.alignment === alignment,
+      closeOnActivate: true,
+      onActivate: () => {
+        this.data.alignment = alignment;
+        this.updateAlignment();
+      }
+    }));
+  }
+
+  wrap(blockContent) {
+    this.wrapper = document.createElement('div');
+    this.wrapper.classList.add('alignment-tune');
+    this.wrapper.dataset.alignment = this.data.alignment;
+    this.wrapper.style.textAlign = this.data.alignment;
+    this.wrapper.appendChild(blockContent);
+
+    return this.wrapper;
+  }
+
+  updateAlignment() {
+    if (this.wrapper) {
+      this.wrapper.dataset.alignment = this.data.alignment;
+      this.wrapper.style.textAlign = this.data.alignment;
+    }
+  }
+
+  save() {
+    return this.data;
+  }
+
+  getAlignIcon(alignment) {
+    const icons = {
+      left: '<svg width="18" height="18" viewBox="0 0 24 24"><path d="M3 21h18v-2H3v2zm0-4h12v-2H3v2zm0-4h18v-2H3v2zm0-4h12V7H3v2zm0-6v2h18V3H3z"/></svg>',
+      center: '<svg width="18" height="18" viewBox="0 0 24 24"><path d="M7 21h10v-2H7v2zm-4-4h18v-2H3v2zm4-4h10v-2H7v2zm-4-4h18V7H3v2zm4-6v2h10V3H7z"/></svg>',
+      right: '<svg width="18" height="18" viewBox="0 0 24 24"><path d="M3 21h18v-2H3v2zm6-4h12v-2H9v2zm-6-4h18v-2H3v2zm6-4h12V7H9v2zm-6-6v2h18V3H3z"/></svg>'
+    };
+    return icons[alignment];
+  }
+};
 </script>
 """
 
@@ -906,7 +1099,21 @@ _EDITORJS_INIT_JS = """
       List: typeof window.List,
       CodeTool: typeof window.CodeTool,
       Quote: typeof window.Quote,
-      Delimiter: typeof window.Delimiter
+      Delimiter: typeof window.Delimiter,
+      Bold: typeof window.Bold,
+      Italic: typeof window.Italic,
+      Underline: typeof window.Underline,
+      LinkTool: typeof window.LinkTool,
+      Marker: typeof window.Marker,
+      Table: typeof window.Table,
+      EditorjsTable: typeof window.EditorjsTable,
+      ImageTool: typeof window.ImageTool,
+      SimpleImage: typeof window.SimpleImage,
+      Checklist: typeof window.Checklist,
+      Warning: typeof window.Warning,
+      Embed: typeof window.Embed,
+      AttachesTool: typeof window.AttachesTool,
+      RawTool: typeof window.RawTool
     });
 
     const tools = {};
@@ -916,23 +1123,87 @@ _EDITORJS_INIT_JS = """
         config: {
           levels: [1, 2, 3],
           defaultLevel: 2
-        }
+        },
+        tunes: ['alignment']
       };
     }
     if (typeof window.List !== 'undefined') {
       tools.list = {
         class: window.List,
-        inlineToolbar: true
+        inlineToolbar: true,
+        tunes: ['alignment']
       };
     }
     if (typeof window.CodeTool !== 'undefined') {
       tools.code = window.CodeTool;
     }
     if (typeof window.Quote !== 'undefined') {
-      tools.quote = window.Quote;
+      tools.quote = {
+        class: window.Quote,
+        inlineToolbar: true,
+        tunes: ['alignment']
+      };
     }
     if (typeof window.Delimiter !== 'undefined') {
       tools.delimiter = window.Delimiter;
+    }
+    if (typeof window.Bold !== 'undefined') {
+      tools.bold = window.Bold;
+    }
+    if (typeof window.Italic !== 'undefined') {
+      tools.italic = window.Italic;
+    }
+    if (typeof window.Underline !== 'undefined') {
+      tools.underline = window.Underline;
+    }
+    if (typeof window.LinkTool !== 'undefined') {
+      tools.link = window.LinkTool;
+    }
+    if (typeof window.Marker !== 'undefined') {
+      tools.marker = window.Marker;
+    }
+    if (typeof window.Table !== 'undefined') {
+      tools.table = {
+        class: window.Table,
+        inlineToolbar: true
+      };
+    } else if (typeof window.EditorjsTable !== 'undefined') {
+      tools.table = {
+        class: window.EditorjsTable,
+        inlineToolbar: true
+      };
+    }
+    if (typeof window.ImageTool !== 'undefined') {
+      tools.image = {
+        class: window.ImageTool,
+        inlineToolbar: true
+      };
+    } else if (typeof window.SimpleImage !== 'undefined') {
+      tools.image = {
+        class: window.SimpleImage,
+        inlineToolbar: true
+      };
+    }
+    if (typeof window.Checklist !== 'undefined') {
+      tools.checklist = {
+        class: window.Checklist,
+        inlineToolbar: true
+      };
+    }
+    if (typeof window.Warning !== 'undefined') {
+      tools.warning = window.Warning;
+    }
+    if (typeof window.Embed !== 'undefined') {
+      tools.embed = window.Embed;
+    }
+    if (typeof window.AttachesTool !== 'undefined') {
+      tools.attaches = window.AttachesTool;
+    }
+    if (typeof window.RawTool !== 'undefined') {
+      tools.raw = window.RawTool;
+    }
+    if (typeof window.AlignmentTune !== 'undefined') {
+      tools.alignment = window.AlignmentTune;
     }
 
     window.editorjsEditor = new EditorJS({
