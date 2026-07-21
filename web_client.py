@@ -701,6 +701,32 @@ EDITOR_HEAD = """
   .tc-toolbox--showed {
     z-index: 3 !important;
   }
+  #editorjs-undo-bar {
+    display: flex;
+    gap: 4px;
+    padding: 6px 10px;
+    border-bottom: 1px solid var(--border-color-primary, #444);
+  }
+  #editorjs-undo-bar button {
+    background: var(--editorjs-dark-background, #52525b);
+    color: var(--text-color-primary, #fff);
+    border: 1px solid var(--border-color-primary, #444);
+    border-radius: 6px;
+    padding: 4px 12px;
+    font-size: 13px;
+    cursor: pointer;
+    transition: background 0.15s, opacity 0.15s;
+  }
+  #editorjs-undo-bar button:hover:not(:disabled) {
+    background: #80808f;
+  }
+  #editorjs-undo-bar button:disabled {
+    opacity: 0.35;
+    cursor: not-allowed;
+  }
+  #editorjs-undo-bar button:active:not(:disabled) {
+    background: var(--editorjs-dark-block-selected-background, #896755);
+  }
   /* ================================== */
   
   /* Alignment tune styles */
@@ -1225,6 +1251,9 @@ _EDITORJS_INIT_JS = """
         blocks: []
       },
       onChange: () => {
+        if (window.editorjsHistory && !window.editorjsHistory._restoring) {
+          window.editorjsHistory._debouncedSave();
+        }
         window.editorjsEditor.save().then((outputData) => {
           const hidden = document.querySelector('#editorjs_hidden_content textarea');
           if (hidden) {
@@ -1236,6 +1265,127 @@ _EDITORJS_INIT_JS = """
         });
       }
     });
+    class EditorHistory {
+      constructor(editor, maxStack) {
+        this.editor = editor;
+        this.undoStack = [];
+        this.redoStack = [];
+        this.maxStack = maxStack || 100;
+        this._restoring = false;
+        this._debounceTimer = null;
+        this.undoBtn = document.getElementById('editorjs-undo-btn');
+        this.redoBtn = document.getElementById('editorjs-redo-btn');
+        this._bindButtons();
+        this._bindKeyboard();
+      }
+      _bindButtons() {
+        const self = this;
+        if (this.undoBtn) {
+          this.undoBtn.addEventListener('click', () => { self.undo(); });
+        }
+        if (this.redoBtn) {
+          this.redoBtn.addEventListener('click', () => { self.redo(); });
+        }
+      }
+      _bindKeyboard() {
+        const self = this;
+        document.addEventListener('keydown', (e) => {
+          const isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0;
+          const mod = isMac ? e.metaKey : e.ctrlKey;
+          if (mod && e.key === 'z' && !e.shiftKey) {
+            e.preventDefault();
+            self.undo();
+          } else if (mod && e.key === 'z' && e.shiftKey) {
+            e.preventDefault();
+            self.redo();
+          } else if (mod && e.key === 'y') {
+            e.preventDefault();
+            self.redo();
+          }
+        });
+      }
+      _updateButtons() {
+        if (this.undoBtn) this.undoBtn.disabled = this.undoStack.length === 0;
+        if (this.redoBtn) this.redoBtn.disabled = this.redoStack.length === 0;
+      }
+      _debouncedSave() {
+        if (this._restoring) return;
+        clearTimeout(this._debounceTimer);
+        const self = this;
+        this._debounceTimer = setTimeout(() => {
+          self._snapshot();
+        }, 300);
+      }
+      async _snapshot() {
+        if (this._restoring) return;
+        try {
+          const data = await this.editor.save();
+          const last = this.undoStack[this.undoStack.length - 1];
+          if (last && JSON.stringify(last) === JSON.stringify(data)) return;
+          this.undoStack.push(data);
+          if (this.undoStack.length > this.maxStack) {
+            this.undoStack.shift();
+          }
+          this.redoStack = [];
+          this._updateButtons();
+        } catch (err) {
+          console.error('[EditorHistory] snapshot failed:', err);
+        }
+      }
+      async undo() {
+        if (this.undoStack.length === 0) return;
+        this._restoring = true;
+        try {
+          const current = await this.editor.save();
+          this.redoStack.push(current);
+          const prev = this.undoStack.pop();
+          await this.editor.render(prev);
+        } catch (err) {
+          console.error('[EditorHistory] undo failed:', err);
+        }
+        this._restoring = false;
+        this._updateButtons();
+        this._syncHidden();
+      }
+      async redo() {
+        if (this.redoStack.length === 0) return;
+        this._restoring = true;
+        try {
+          const current = await this.editor.save();
+          this.undoStack.push(current);
+          const next = this.redoStack.pop();
+          await this.editor.render(next);
+        } catch (err) {
+          console.error('[EditorHistory] redo failed:', err);
+        }
+        this._restoring = false;
+        this._updateButtons();
+        this._syncHidden();
+      }
+      async initialize(data) {
+        this.undoStack = [];
+        this.redoStack = [];
+        this._restoring = false;
+        try {
+          const current = await this.editor.save();
+          this.undoStack.push(current);
+          this._updateButtons();
+        } catch (err) {
+          console.error('[EditorHistory] initialize failed:', err);
+        }
+      }
+      _syncHidden() {
+        this.editor.save().then((outputData) => {
+          const hidden = document.querySelector('#editorjs_hidden_content textarea');
+          if (hidden) {
+            hidden.value = JSON.stringify(outputData);
+            hidden.dispatchEvent(new Event('input', { bubbles: true }));
+          }
+        });
+      }
+    }
+    window.editorjsHistory = new EditorHistory(window.editorjsEditor, 100);
+    console.log('[EDITORJS_INIT] Custom undo/redo manager enabled');
     console.log('[EDITORJS_INIT] Editor.js initialized successfully');
   }
   setTimeout(initEditorJs, 300);
@@ -1277,6 +1427,14 @@ _PUSH_INTO_EDITORJS_JS = """
     const data = typeof editorJsData === 'string' ? JSON.parse(editorJsData) : editorJsData;
     window.editorjsEditor.render(data).then(() => {
       console.log('[PUSH_INTO_EDITORJS] Data rendered successfully');
+      if (window.editorjsHistory) {
+        window.editorjsHistory.initialize(data);
+        console.log('[PUSH_INTO_EDITORJS] Undo history re-initialized with new data');
+      }
+      const undoBtn = document.getElementById('editorjs-undo-btn');
+      const redoBtn = document.getElementById('editorjs-redo-btn');
+      if (undoBtn) undoBtn.disabled = true;
+      if (redoBtn) redoBtn.disabled = true;
     }).catch((error) => {
       console.error('[PUSH_INTO_EDITORJS] Render failed:', error);
     });
@@ -1349,7 +1507,7 @@ def build_demo():
                 # Editor.js renders JSON blocks directly, so this one
                 # pane replaces the separate Preview + Edit tabs -- what
                 # you see is what you can immediately click into and edit.
-                gr.HTML('<div id="editorjs-editor-wrap"><div id="editorjs"></div></div>')
+                gr.HTML('<div id="editorjs-editor-wrap"><div id="editorjs-undo-bar"><button id="editorjs-undo-btn" disabled title="Undo (Ctrl+Z)">↩ Undo</button><button id="editorjs-redo-btn" disabled title="Redo (Ctrl+Shift+Z)">↪ Redo</button></div><div id="editorjs"></div></div>')
                 # Bridge only -- never shown to the user. Editor.js's JSON
                 # lives here so Python can read/write it.
                 editorjs_hidden = gr.Textbox(elem_id="editorjs_hidden_content", visible=True)
