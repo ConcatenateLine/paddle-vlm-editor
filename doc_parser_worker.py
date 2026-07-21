@@ -32,6 +32,66 @@ import json
 import traceback
 from pathlib import Path
 
+IMAGE_BLOCK_LABELS = {"image", "header_image"}
+
+
+def _extract_images_from_pdf(input_path: str, work_dir: Path, pages_data: list):
+    """Render each page and crop image blocks using bbox coordinates."""
+    try:
+        import pypdfium2 as pdfium
+    except ImportError:
+        return
+
+    ext = Path(input_path).suffix.lower()
+    if ext not in (".pdf",):
+        return
+
+    try:
+        pdf = pdfium.PdfDocument(input_path)
+    except Exception:
+        return
+
+    images_dir = work_dir / "images"
+    images_dir.mkdir(exist_ok=True)
+
+    for page_idx, page_data in enumerate(pages_data):
+        if not isinstance(page_data, dict):
+            continue
+        parsing = page_data.get("parsing_res_list", [])
+        has_images = any(
+            b.get("block_label") in IMAGE_BLOCK_LABELS for b in parsing
+        )
+        if not has_images:
+            continue
+
+        try:
+            page = pdf[page_idx]
+            bitmap = page.render(scale=2.0)
+            pil_image = bitmap.to_pil()
+        except Exception:
+            continue
+
+        for block in parsing:
+            if block.get("block_label") not in IMAGE_BLOCK_LABELS:
+                continue
+            bbox = block.get("block_bbox")
+            if not bbox or len(bbox) != 4:
+                continue
+            x1, y1, x2, y2 = bbox
+            try:
+                cropped = pil_image.crop((x1 * 2, y1 * 2, x2 * 2, y2 * 2))
+                img_name = f"page{page_idx}_block{block.get('block_id', 0)}.png"
+                img_path = images_dir / img_name
+                cropped.save(str(img_path))
+                block["block_content"] = str(img_path)
+            except Exception:
+                continue
+
+    try:
+        pdf.close()
+    except Exception:
+        pass
+
 
 def _read_first_matching(directory: Path, suffix: str) -> str:
     matches = sorted(directory.glob(f"*{suffix}"))
@@ -43,12 +103,25 @@ def _read_first_matching(directory: Path, suffix: str) -> str:
 def run_doc_parser(pipeline, input_path: str, work_dir: Path):
     outputs = pipeline.predict(input_path)
     json_parts = []
+    pages_data = []
     for i, res in enumerate(outputs):
         page_dir = work_dir / f"page_{i:03d}"
         page_dir.mkdir(exist_ok=True)
         res.save_to_json(save_path=str(page_dir))
-        json_parts.append(_read_first_matching(page_dir, ".json"))
-    combined_json = "[\n" + ",\n".join(p for p in json_parts if p) + "\n]"
+        raw = _read_first_matching(page_dir, ".json")
+        json_parts.append(raw)
+        if raw:
+            try:
+                pages_data.append(json.loads(raw))
+            except Exception:
+                pages_data.append({})
+
+    _extract_images_from_pdf(input_path, work_dir, pages_data)
+
+    updated_parts = []
+    for page_obj in pages_data:
+        updated_parts.append(json.dumps(page_obj, ensure_ascii=False))
+    combined_json = "[\n" + ",\n".join(p for p in updated_parts if p) + "\n]"
     return combined_json, "json"
 
 

@@ -907,9 +907,13 @@ window.convertBlockToEditorJs = function(block, blocks) {
   
   if (block.block_label === 'image' || block.block_label === 'header_image') {
     if (block.block_content && block.block_content.trim()) {
+      var imgUrl = block.block_content;
+      if (imgUrl.indexOf('/') === 0) {
+        imgUrl = '/gradio_api/file=' + imgUrl;
+      }
       blocks.push({
         type: 'simple-image',
-        data: { url: block.block_content, caption: '', stretched: false, withBorder: false, withBackground: false }
+        data: { url: imgUrl, caption: '', stretched: false, withBorder: false, withBackground: false }
       });
     } else if (block.block_content === '') {
       blocks.push({
