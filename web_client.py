@@ -614,29 +614,31 @@ def refresh_library():
 # Loaded once into <head> so the library is available before any of our
 # JS snippets run. Editor.js uses block-based JSON output instead of HTML.
 EDITOR_HEAD = """
-<script src="https://cdn.jsdelivr.net/npm/@editorjs/table@2.4.5/dist/table.umd.min.js" defer></script>
-<script src="https://cdn.jsdelivr.net/npm/@editorjs/editorjs@latest"></script>
-<script src="https://cdn.jsdelivr.net/npm/@editorjs/header@latest/dist/bundle.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/@editorjs/list@latest/dist/bundle.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/@editorjs/code@latest/dist/bundle.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/@editorjs/quote@latest/dist/bundle.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/@editorjs/delimiter@latest/dist/bundle.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/@editorjs/bold@latest/dist/bundle.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/@editorjs/italic@latest/dist/bundle.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/@editorjs/underline@latest/dist/bundle.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/@editorjs/link@latest/dist/bundle.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/@editorjs/marker@latest/dist/bundle.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/@editorjs/table@latest/dist/table.umd.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/@editorjs/simple-image@latest/dist/bundle.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/@editorjs/checklist@latest/dist/bundle.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/@editorjs/warning@latest/dist/bundle.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/@editorjs/embed@latest/dist/bundle.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/@editorjs/attaches@latest/dist/bundle.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/@editorjs/raw@latest/dist/bundle.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@editorjs/editorjs@latest" defer></script>
+<script src="https://cdn.jsdelivr.net/npm/@editorjs/table@latest/dist/table.umd.js" defer></script>
+<script src="https://cdn.jsdelivr.net/npm/@editorjs/header@latest/dist/bundle.js" defer></script>
+<script src="https://cdn.jsdelivr.net/npm/@editorjs/list@latest/dist/bundle.js" defer></script>
+<script src="https://cdn.jsdelivr.net/npm/@editorjs/code@latest/dist/bundle.js" defer></script>
+<script src="https://cdn.jsdelivr.net/npm/@editorjs/quote@latest/dist/bundle.js" defer></script>
+<script src="https://cdn.jsdelivr.net/npm/@editorjs/delimiter@latest/dist/bundle.js" defer></script>
+<script src="https://cdn.jsdelivr.net/npm/@editorjs/bold@latest/dist/bundle.js" defer></script>
+<script src="https://cdn.jsdelivr.net/npm/@editorjs/italic@latest/dist/bundle.js" defer></script>
+<script src="https://cdn.jsdelivr.net/npm/@editorjs/underline@latest/dist/bundle.js" defer></script>
+<script src="https://cdn.jsdelivr.net/npm/@editorjs/link@latest/dist/bundle.js" defer></script>
+<script src="https://cdn.jsdelivr.net/npm/@editorjs/marker@latest/dist/bundle.js" defer></script>
+<script src="https://cdn.jsdelivr.net/npm/@editorjs/simple-image@latest/dist/bundle.js" defer></script>
+<script src="https://cdn.jsdelivr.net/npm/@editorjs/checklist@latest/dist/bundle.js" defer></script>
+<script src="https://cdn.jsdelivr.net/npm/@editorjs/warning@latest/dist/bundle.js" defer></script>
+<script src="https://cdn.jsdelivr.net/npm/@editorjs/embed@latest/dist/bundle.js" defer></script>
+<script src="https://cdn.jsdelivr.net/npm/@editorjs/attaches@latest/dist/bundle.js" defer></script>
+<script src="https://cdn.jsdelivr.net/npm/@editorjs/raw@latest/dist/bundle.js" defer></script>
 <style>
+  /* ================================== */
+  /* Editor.js dark mode variables */
   --editorjs-dark-background: #52525b;
   --editorjs-dark-toolbar-blockmenu-btn-hover: #52525b;
   --editorjs-dark-block-selected-background: #896755;
+  /* ================================== */
 
   #editorjs-editor-wrap { border: 1px solid var(--border-color-primary, #444); border-radius: 8px; }
   /* editorjs_hidden_content is a bridge component only -- it must stay
@@ -648,6 +650,10 @@ EDITOR_HEAD = """
   #editorjs { min-height: 560px; background: var(--background-fill-primary, #fff); padding: 20px; }
   .ce-block__content { font-size: 15px; line-height: 1.6; }
   .ce-toolbar__content { max-width: 100%; }
+  
+  /* ================================== */
+  /* Manual dark mode overrides for Editor.js components */
+
   .ce-stub {
     background: var(--editorjs-dark-background, #52525b);
   }
@@ -673,25 +679,30 @@ EDITOR_HEAD = """
   .codex-editor ::selection {
     background-color: var(--editorjs-dark-block-selected-background, #896755);
   }
-  .tc-wrap .tc-table .tc-table--heading .tc-row:first-child {
-    background: #27272a;
-  }
   .tc-add-column:hover, .tc-add-row:hover {
     background-color: #52525b !important;
   }
+  .tc-add-column svg, .tc-add-row svg {
+    background-color: #52525b !important;
+  }
+  .tc-table--heading .tc-row:first-child {
+    background: #27272a !important;
+  }
   .tc-popover {
-    background: #52525b;
+    background: #52525b !important;
   }
   .tc-popover__item-icon {
-    background: #27272a;
+    background: #27272a !important;
   }
-  .tc-cell--selected {
-    background: #896755;
+  .tc-cell--selected,
+  .tc-row--selected {
+    background: #896755 !important;
   }
   .tc-toolbox--showed {
-    z-index: 3;
+    z-index: 3 !important;
   }
-
+  /* ================================== */
+  
   /* Alignment tune styles */
   .alignment-tune {
     width: 100%;
