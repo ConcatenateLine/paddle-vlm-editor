@@ -905,26 +905,72 @@ window.convertBlockToEditorJs = function(block, blocks) {
     return;
   }
   
+  if (block.block_label === 'image' || block.block_label === 'header_image') {
+    if (block.block_content && block.block_content.trim()) {
+      blocks.push({
+        type: 'simple-image',
+        data: { url: block.block_content, caption: '', stretched: false, withBorder: false, withBackground: false }
+      });
+    } else if (block.block_content === '') {
+      blocks.push({
+        type: 'paragraph',
+        data: { text: '[' + block.block_label + ']' }
+      });
+    }
+    return;
+  }
+  
   if (block.block_content) {
     const label = block.block_label || '';
     const content = block.block_content;
     
-    if (label === 'title' || label === 'header' || label === 'paragraph_title') {
+    if (label === 'title' || label === 'header') {
       blocks.push({
         type: 'header',
-        data: { text: content, level: 2 }
+        data: { text: content, level: 1 }
       });
-    } else if (label === 'text' || label === 'paragraph') {
+    } else if (label === 'paragraph_title') {
+      blocks.push({
+        type: 'header',
+        data: { text: content, level: 3 }
+      });
+    } else if (label === 'text' || label === 'paragraph' || label === 'content') {
       blocks.push({
         type: 'paragraph',
         data: { text: content }
       });
     } else if (label === 'table' || label === 'table_body') {
       if (content.indexOf('<table') >= 0 || content.indexOf('<tr') >= 0 || content.indexOf('<td') >= 0) {
-        blocks.push({
-          type: 'paragraph',
-          data: { text: content }
-        });
+        var tmp = document.createElement('div');
+        tmp.innerHTML = content;
+        var tableEl = tmp.querySelector('table');
+        if (tableEl) {
+          var rows = [];
+          var trs = tableEl.querySelectorAll('tr');
+          trs.forEach(function(tr) {
+            var cells = [];
+            tr.querySelectorAll('td, th').forEach(function(cell) {
+              cells.push(cell.textContent.trim());
+            });
+            if (cells.length > 0) rows.push(cells);
+          });
+          if (rows.length > 0) {
+            blocks.push({
+              type: 'table',
+              data: { content: rows }
+            });
+          } else {
+            blocks.push({
+              type: 'paragraph',
+              data: { text: content }
+            });
+          }
+        } else {
+          blocks.push({
+            type: 'paragraph',
+            data: { text: content }
+          });
+        }
       } else {
         blocks.push({
           type: 'paragraph',
@@ -941,13 +987,6 @@ window.convertBlockToEditorJs = function(block, blocks) {
         type: 'list',
         data: { style: 'ordered', items: [content] }
       });
-    } else if (label === 'header_image') {
-      if (content && content.trim()) {
-        blocks.push({
-          type: 'paragraph',
-          data: { text: '[Image: ' + content + ']' }
-        });
-      }
     } else if (label === 'footer') {
       blocks.push({
         type: 'paragraph',
