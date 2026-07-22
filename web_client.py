@@ -525,7 +525,15 @@ def process_file(file, data_choice, pipeline_label, device):
     choices = library_choices(records)
     is_image = Path(stored_original).suffix.lower() in IMAGE_EXTS
     preview_update = gr.update(value=str(stored_original) if is_image else None, visible=is_image)
-    file_update = gr.update(value=str(stored_original) if not is_image else None, visible=not is_image)
+    
+    # Generate HTML iframe for PDF preview
+    if not is_image:
+        # Use Gradio's file parameter to get the correct URL
+        file_url = f"/gradio_api/file={stored_original}"
+        file_html = f'<iframe src="{file_url}" width="100%" height="560" style="border: none;"></iframe>'
+        file_update = gr.update(value=file_html, visible=True)
+    else:
+        file_update = gr.update(value=None, visible=False)
 
     return (
         "\n".join(status_lines),
@@ -548,11 +556,20 @@ def load_from_library(record_id):
         text = f"This run failed:\n\n{record.get('error', 'unknown error')}"
         original = record["original_path"]
         is_image = Path(original).suffix.lower() in IMAGE_EXTS
-        return (
-            text,
-            gr.update(value=original if is_image else None, visible=is_image),
-            gr.update(value=original if not is_image else None, visible=not is_image),
-        )
+        if is_image:
+            return (
+                text,
+                gr.update(value=original if is_image else None, visible=is_image),
+                gr.update(value=None, visible=False),
+            )
+        else:
+            file_url = f"/gradio_api/file={original}"
+            file_html = f'<iframe src="{file_url}" width="100%" height="560" style="border: none;"></iframe>'
+            return (
+                text,
+                gr.update(value=None, visible=False),
+                gr.update(value=file_html, visible=True),
+            )
 
     output_path = Path(record["output_path"])
      
@@ -577,11 +594,20 @@ def load_from_library(record_id):
     original = record["original_path"]
     is_image = Path(original).suffix.lower() in IMAGE_EXTS
 
-    return (
-        content,
-        gr.update(value=original if is_image else None, visible=is_image),
-        gr.update(value=original if not is_image else None, visible=not is_image),
-    )
+    if is_image:
+        return (
+            content,
+            gr.update(value=original if is_image else None, visible=is_image),
+            gr.update(value=None, visible=False),
+        )
+    else:
+        file_url = f"/gradio_api/file={original}"
+        file_html = f'<iframe src="{file_url}" width="100%" height="560" style="border: none;"></iframe>'
+        return (
+            content,
+            gr.update(value=None, visible=False),
+            gr.update(value=file_html, visible=True),
+        )
 
 
 def pull_from_editorjs(edited_json):
@@ -1546,7 +1572,7 @@ def build_demo():
         with gr.Row():
             with gr.Column(scale=1):
                 image_preview = gr.Image(label="Original", visible=False, height=560)
-                file_preview = gr.File(label="Original file", visible=True)
+                file_preview = gr.HTML(label="Original file", visible=True)
 
             with gr.Column(scale=2):
                 # Editor.js renders JSON blocks directly, so this one
