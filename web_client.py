@@ -638,13 +638,6 @@ EDITOR_HEAD = """
 <script src="https://cdn.jsdelivr.net/npm/@editorjs/attaches@latest/dist/bundle.js" defer></script>
 <script src="https://cdn.jsdelivr.net/npm/@editorjs/raw@latest/dist/bundle.js" defer></script>
 <style>
-  /* ================================== */
-  /* Editor.js dark mode variables */
-  --editorjs-dark-background: #52525b;
-  --editorjs-dark-toolbar-blockmenu-btn-hover: #52525b;
-  --editorjs-dark-block-selected-background: #896755;
-  /* ================================== */
-
   #editorjs-editor-wrap { border: 1px solid var(--border-color-primary, #444); border-radius: 8px; }
   /* editorjs_hidden_content is a bridge component only -- it must stay
      mounted in the DOM for the JS push/pull snippets to find it, so we
@@ -656,54 +649,52 @@ EDITOR_HEAD = """
   .ce-block__content { font-size: 15px; line-height: 1.6; }
   .ce-toolbar__content { max-width: 100%; }
   
-  /* ================================== */
   /* Manual dark mode overrides for Editor.js components */
-
-  .ce-stub {
-    background: var(--editorjs-dark-background, #52525b);
+  body.dark .ce-stub {
+    background: #52525b;
   }
-  .ce-toolbar__settings-btn:hover {
-    background: var(--editorjs-dark-toolbar-blockmenu-btn-hover, #52525b);
+  body.dark .ce-toolbar__settings-btn:hover {
+    background: #52525b;
   }
-  .ce-toolbar__plus:hover {
-    background-color: var(--editorjs-dark-toolbar-blockmenu-btn-hover, #52525b);
+  body.dark .ce-toolbar__plus:hover {
+    background-color: #52525b;
   }
-  .ce-block--selected .ce-block__content {
-    background: var(--editorjs-dark-block-selected-background, #896755);
-    box-shadow: var(--editorjs-dark-block-selected-background, #896755) 0px 1px 4px, var(--editorjs-dark-block-selected-background, #896755) 0px 0px 0px 3px;
+  body.dark .ce-block--selected .ce-block__content {
+    background: #896755;
+    box-shadow: #896755 0px 1px 4px, #896755 0px 0px 0px 3px;
   }
-  .ce-popover__container {
-    background: var(--editorjs-dark-toolbar-blockmenu-btn-hover, #52525b);
+  body.dark .ce-popover__container {
+    background: #52525b;
   }
-  .cdx-search-field {
+  body.dark .cdx-search-field {
     background: #27272a;
   }
-  .ce-popover-item:hover:not(.ce-popover-item--no-hover) {
+  body.dark .ce-popover-item:hover:not(.ce-popover-item--no-hover) {
     background-color: #80808f;
   }
-  .codex-editor ::selection {
-    background-color: var(--editorjs-dark-block-selected-background, #896755);
+  body.dark .codex-editor ::selection {
+    background-color: #896755;
   }
-  .tc-add-column:hover, .tc-add-row:hover {
+  body.dark .tc-add-column:hover, body.dark .tc-add-row:hover {
     background-color: #52525b !important;
   }
-  .tc-add-column svg, .tc-add-row svg {
+  body.dark .tc-add-column svg, body.dark .tc-add-row svg {
     background-color: #52525b !important;
   }
-  .tc-table--heading .tc-row:first-child {
+  body.dark .tc-table--heading .tc-row:first-child {
     background: #27272a !important;
   }
-  .tc-popover {
+  body.dark .tc-popover {
     background: #52525b !important;
   }
-  .tc-popover__item-icon {
+  body.dark .tc-popover__item-icon {
     background: #27272a !important;
   }
-  .tc-cell--selected,
-  .tc-row--selected {
+  body.dark .tc-cell--selected,
+  body.dark .tc-row--selected {
     background: #896755 !important;
   }
-  .tc-toolbox--showed {
+  body.dark .tc-toolbox--showed {
     z-index: 3 !important;
   }
   #editorjs-undo-bar {
@@ -712,9 +703,9 @@ EDITOR_HEAD = """
     padding: 6px 10px;
     border-bottom: 1px solid var(--border-color-primary, #444);
   }
-  #editorjs-undo-bar button {
-    background: var(--editorjs-dark-background, #52525b);
-    color: var(--text-color-primary, #fff);
+  body.dark #editorjs-undo-bar button {
+    background: #52525b;
+    color: #fff;
     border: 1px solid var(--border-color-primary, #444);
     border-radius: 6px;
     padding: 4px 12px;
@@ -722,17 +713,16 @@ EDITOR_HEAD = """
     cursor: pointer;
     transition: background 0.15s, opacity 0.15s;
   }
-  #editorjs-undo-bar button:hover:not(:disabled) {
+  body.dark #editorjs-undo-bar button:hover:not(:disabled) {
     background: #80808f;
   }
-  #editorjs-undo-bar button:disabled {
+  body.dark #editorjs-undo-bar button:disabled {
     opacity: 0.35;
     cursor: not-allowed;
   }
-  #editorjs-undo-bar button:active:not(:disabled) {
-    background: var(--editorjs-dark-block-selected-background, #896755);
+  body.dark #editorjs-undo-bar button:active:not(:disabled) {
+    background: #896755;
   }
-  /* ================================== */
   
   /* Alignment tune styles */
   .alignment-tune {
