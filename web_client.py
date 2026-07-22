@@ -584,6 +584,11 @@ def load_from_library(record_id):
     )
 
 
+def pull_from_editorjs(edited_json):
+    """Python wrapper that triggers the JavaScript pull and returns the updated JSON."""
+    return edited_json
+
+
 def save_edit(record_id, edited_json):
     if not record_id:
         return "Nothing selected to save.", edited_json
@@ -1498,16 +1503,16 @@ _PUSH_INTO_EDITORJS_JS = """
 # before any event that needs to read the latest edited content on the
 # Python side (e.g. Save).
 _PULL_FROM_EDITORJS_JS = """
-() => {
-  const hidden = document.querySelector('#editorjs_hidden_content textarea');
-  if (hidden && window.editorjsEditor) {
-    window.editorjsEditor.save().then((outputData) => {
-      hidden.value = JSON.stringify(outputData);
-      hidden.dispatchEvent(new Event('input', { bubbles: true }));
+(edited_json) => {
+  if (window.editorjsEditor) {
+    return window.editorjsEditor.save().then((outputData) => {
+      return JSON.stringify(outputData);
     }).catch((error) => {
       console.error('Saving failed: ', error);
+      throw error;
     });
   }
+  return edited_json;
 }
 """
 
@@ -1594,7 +1599,10 @@ def build_demo():
 
         save_button.click(
             # Grab the latest Editor.js data before running the Python save.
-            fn=None, js=_PULL_FROM_EDITORJS_JS
+            pull_from_editorjs,
+            inputs=[editorjs_hidden],
+            outputs=[editorjs_hidden],
+            js=_PULL_FROM_EDITORJS_JS
         ).then(
             save_edit,
             inputs=[current_record, editorjs_hidden],
