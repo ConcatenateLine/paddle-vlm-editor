@@ -35,62 +35,194 @@ from pathlib import Path
 IMAGE_BLOCK_LABELS = {"image", "header_image"}
 
 
-def _extract_images_from_pdf(input_path: str, work_dir: Path, pages_data: list):
-    """Render each page and crop image blocks using bbox coordinates."""
-    try:
-        import pypdfium2 as pdfium
-    except ImportError:
-        return
+def _iou(box_a, box_b):
+    """Intersection over Union for two [x1, y1, x2, y2] boxes."""
+    ix1 = max(box_a[0], box_b[0])
+    iy1 = max(box_a[1], box_b[1])
+    ix2 = min(box_a[2], box_b[2])
+    iy2 = min(box_a[3], box_b[3])
+    inter = max(0, ix2 - ix1) * max(0, iy2 - iy1)
+    area_a = (box_a[2] - box_a[0]) * (box_a[3] - box_a[1])
+    area_b = (box_b[2] - box_b[0]) * (box_b[3] - box_b[1])
+    union = area_a + area_b - inter
+    return inter / union if union > 0 else 0
 
-    ext = Path(input_path).suffix.lower()
-    if ext not in (".pdf",):
-        return
 
-    try:
-        pdf = pdfium.PdfDocument(input_path)
-    except Exception:
-        return
+def _extract_images_from_blocks(input_path: str, work_dir: Path, pages_data: list):
+    """Extract image blocks from the document.
 
+    For PDFs: uses PyMuPDF to extract embedded images directly, matching
+    them to PaddleOCR-VL blocks by bbox overlap.  Falls back to rendering
+    the page region if no embedded image matches.
+
+    For images (PNG/JPG/etc.): crops directly from the source image using
+    PaddleOCR-VL's bbox coordinates (which are in image pixel space).
+    """
     images_dir = work_dir / "images"
     images_dir.mkdir(exist_ok=True)
 
-    for page_idx, page_data in enumerate(pages_data):
-        if not isinstance(page_data, dict):
-            continue
-        parsing = page_data.get("parsing_res_list", [])
-        has_images = any(
-            b.get("block_label") in IMAGE_BLOCK_LABELS for b in parsing
-        )
-        if not has_images:
-            continue
+    ext = Path(input_path).suffix.lower()
+    if ext == ".pdf":
+        _extract_from_pdf(input_path, images_dir, pages_data)
+    else:
+        _extract_from_image(input_path, images_dir, pages_data)
 
-        try:
-            page = pdf[page_idx]
-            bitmap = page.render(scale=2.0)
-            pil_image = bitmap.to_pil()
-        except Exception:
-            continue
 
-        for block in parsing:
-            if block.get("block_label") not in IMAGE_BLOCK_LABELS:
+def _extract_from_pdf(input_path, images_dir, pages_data):
+    """Extract embedded images from a PDF using PyMuPDF.
+
+    PaddleOCR-VL renders PDF pages at 144 DPI (2× the 72-DPI PDF coordinate
+    system), so its bbox coordinates are in a 2×-scaled pixel space.  We scale
+    bboxes down by 0.5 before using them with PyMuPDF, which expects PDF
+    point coordinates.
+    """
+    try:
+        import pymupdf
+    except ImportError:
+        return
+
+    try:
+        doc = pymupdf.open(input_path)
+    except Exception:
+        return
+
+    try:
+        for page_idx, page_data in enumerate(pages_data):
+            if not isinstance(page_data, dict):
                 continue
-            bbox = block.get("block_bbox")
-            if not bbox or len(bbox) != 4:
+            parsing = page_data.get("parsing_res_list", [])
+            image_blocks = [
+                b for b in parsing
+                if b.get("block_label") in IMAGE_BLOCK_LABELS
+                and b.get("block_bbox") and len(b["block_bbox"]) == 4
+            ]
+            if not image_blocks:
                 continue
-            x1, y1, x2, y2 = bbox
+
             try:
-                cropped = pil_image.crop((x1 * 2, y1 * 2, x2 * 2, y2 * 2))
-                img_name = f"page{page_idx}_block{block.get('block_id', 0)}.png"
-                img_path = images_dir / img_name
-                cropped.save(str(img_path))
-                block["block_content"] = str(img_path)
+                page = doc[page_idx]
             except Exception:
                 continue
 
+            page_rect = page.rect
+
+            embedded_images = []
+            for img in page.get_images(full=True):
+                xref = img[0]
+                try:
+                    rects = page.get_image_rects(xref)
+                    for rect in rects:
+                        embedded_images.append({
+                            "xref": xref,
+                            "rect": [rect.x0, rect.y0, rect.x1, rect.y1],
+                        })
+                except Exception:
+                    continue
+
+            matched_embedded = set()
+            for block in image_blocks:
+                raw_bbox = block["block_bbox"]
+                pdf_bbox = [c * 0.5 for c in raw_bbox]
+
+                best_iou = 0
+                best_idx = None
+                for i, emb in enumerate(embedded_images):
+                    if i in matched_embedded:
+                        continue
+                    iou_val = _iou(pdf_bbox, emb["rect"])
+                    if iou_val > best_iou:
+                        best_iou = iou_val
+                        best_idx = i
+
+                if best_idx is not None and best_iou > 0.3:
+                    matched_embedded.add(best_idx)
+                    emb = embedded_images[best_idx]
+                    try:
+                        pix = pymupdf.Pixmap(doc, emb["xref"])
+                        if pix.n > 4:
+                            pix = pymupdf.Pixmap(pymupdf.csRGB, pix)
+                        img_name = (
+                            f"page{page_idx}_block"
+                            f"{block.get('block_id', 0)}.png"
+                        )
+                        img_path = images_dir / img_name
+                        pix.save(str(img_path))
+                        block["block_content"] = str(img_path)
+                    except Exception:
+                        continue
+
+            unmatched = [
+                b for b in image_blocks
+                if not b.get("block_content")
+            ]
+            if unmatched:
+                for block in unmatched:
+                    raw_bbox = block["block_bbox"]
+                    x1, y1, x2, y2 = [c * 0.5 for c in raw_bbox]
+                    try:
+                        rect = pymupdf.Rect(x1, y1, x2, y2)
+                        rect = rect & page_rect
+                        if rect.is_empty or rect.is_infinite:
+                            continue
+                        pix = page.get_pixmap(clip=rect)
+                        if pix.width == 0 or pix.height == 0:
+                            continue
+                        img_name = (
+                            f"page{page_idx}_block"
+                            f"{block.get('block_id', 0)}.png"
+                        )
+                        img_path = images_dir / img_name
+                        pix.save(str(img_path))
+                        block["block_content"] = str(img_path)
+                    except Exception:
+                        continue
+    finally:
+        try:
+            doc.close()
+        except Exception:
+            pass
+
+
+def _extract_from_image(input_path, images_dir, pages_data):
+    """Crop image blocks directly from an image source."""
     try:
-        pdf.close()
+        from PIL import Image
+    except ImportError:
+        return
+
+    try:
+        pil_image = Image.open(input_path)
     except Exception:
-        pass
+        return
+
+    try:
+        for page_idx, page_data in enumerate(pages_data):
+            if not isinstance(page_data, dict):
+                continue
+            parsing = page_data.get("parsing_res_list", [])
+            for block in parsing:
+                if block.get("block_label") not in IMAGE_BLOCK_LABELS:
+                    continue
+                bbox = block.get("block_bbox")
+                if not bbox or len(bbox) != 4:
+                    continue
+                x1, y1, x2, y2 = bbox
+                try:
+                    cropped = pil_image.crop((x1, y1, x2, y2))
+                    img_name = (
+                        f"page{page_idx}_block"
+                        f"{block.get('block_id', 0)}.png"
+                    )
+                    img_path = images_dir / img_name
+                    cropped.save(str(img_path))
+                    block["block_content"] = str(img_path)
+                except Exception:
+                    continue
+    finally:
+        try:
+            pil_image.close()
+        except Exception:
+            pass
 
 
 def _read_first_matching(directory: Path, suffix: str) -> str:
@@ -116,7 +248,7 @@ def run_doc_parser(pipeline, input_path: str, work_dir: Path):
             except Exception:
                 pages_data.append({})
 
-    _extract_images_from_pdf(input_path, work_dir, pages_data)
+    _extract_images_from_blocks(input_path, work_dir, pages_data)
 
     updated_parts = []
     for page_obj in pages_data:

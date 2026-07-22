@@ -1168,7 +1168,8 @@ _EDITORJS_INIT_JS = """
     const target = document.getElementById('editorjs');
     console.log('[EDITORJS_INIT] Looking for editorjs element:', target);
     console.log('[EDITORJS_INIT] EditorJS available:', typeof EditorJS !== 'undefined');
-    if (!target || typeof EditorJS === 'undefined') {
+    console.log('[EDITORJS_INIT] SimpleImage available:', typeof window.SimpleImage !== 'undefined');
+    if (!target || typeof EditorJS === 'undefined' || typeof window.SimpleImage === 'undefined') {
       console.log('[EDITORJS_INIT] Retrying in 200ms...');
       setTimeout(initEditorJs, 200);
       return;
@@ -1265,7 +1266,7 @@ _EDITORJS_INIT_JS = """
         inlineToolbar: true
       };
     } else if (typeof window.SimpleImage !== 'undefined') {
-      tools.image = {
+      tools['simple-image'] = {
         class: window.SimpleImage,
         inlineToolbar: true
       };
