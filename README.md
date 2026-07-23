@@ -52,6 +52,8 @@ docker compose up -d
 
 On first launch, the container pulls the PaddleOCR-VL model weights (~2 GB) into `./paddlex_cache`. Subsequent starts reuse the cached weights.
 
+![Example: processing a PDF](screenshots/example-pdf.png)
+
 ---
 
 ## Usage
@@ -62,6 +64,8 @@ There are two ways to provide input files:
 
 1. **Upload via the UI** — Click "Upload PDF or Image" and select a file.
 2. **Drop files in `./data`** — Files placed in the `./data` directory appear in the "pick a file already in /mnt/data" dropdown. Use the refresh button after adding files.
+
+![Example: processing an image](screenshots/example-img.png)
 
 ### Supported File Types
 
@@ -76,6 +80,8 @@ There are two ways to provide input files:
 2. Select **gpu** or **cpu** as the device.
 3. Click **Run**.
 4. The extracted content appears in the Editor.js block editor below.
+
+![Example: running a pipeline](screenshots/example-run.png)
 
 ### Pipelines
 
@@ -102,6 +108,8 @@ After processing, the Editor.js block editor displays the extracted content. You
 
 All processed files appear in the **Workspace** dropdown, sorted newest-first. Selecting a past entry reloads its content into the editor. The workspace index (`/mnt/output/index.json`) persists across container restarts.
 
+![Example: table recognition with workspace history](screenshots/example-table-history.png)
+
 ---
 
 ## Architecture
@@ -122,6 +130,7 @@ paddle-vlm-editor/
 │   ├── push_into.js        # JS bridge: hidden textbox -> Editor.js
 │   └── pull_from.js        # JS bridge: Editor.js -> hidden textbox
 ├── doc_parser_worker.py    # Subprocess worker for PaddleOCR-VL pipeline
+├── screenshots/            # Reference images for README
 ├── docker-compose.yml      # Docker Compose configuration
 ├── data/                   # Input files (mounted as /mnt/data)
 ├── output/                 # Persistent results (mounted as /mnt/output)
