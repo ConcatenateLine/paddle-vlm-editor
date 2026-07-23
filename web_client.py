@@ -110,6 +110,8 @@ PIPELINES = {
 
 IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".bmp", ".webp", ".tif", ".tiff"}
 
+PREVIEW_SIZES = {"Small": 300, "Normal (Actual)": 560}
+
 # "spawn" (not the Linux default "fork") is required here: forking would
 # inherit the parent's already-initialized CUDA/paddle context, which is
 # exactly the corrupted state we're trying to escape by using a subprocess
@@ -458,7 +460,7 @@ RUNNERS = {
 # ---------------------------------------------------------------------------
 # Main processing entry point
 # ---------------------------------------------------------------------------
-def process_file(file, data_choice, pipeline_label, device):
+def process_file(file, data_choice, pipeline_label, device, preview_size):
     # An uploaded file takes priority; otherwise fall back to whatever was
     # picked from the /mnt/data dropdown.
     if file is not None:
@@ -482,6 +484,7 @@ def process_file(file, data_choice, pipeline_label, device):
     shutil.copy(source_path, stored_original)
 
     status_lines = [f"Running {pipeline_label} on {original_name}..."]
+    height = PREVIEW_SIZES.get(preview_size, 560)
 
     try:
         output_json, output_format = run_pipeline_with_recovery(
@@ -526,13 +529,13 @@ def process_file(file, data_choice, pipeline_label, device):
 
     choices = library_choices(records)
     is_image = Path(stored_original).suffix.lower() in IMAGE_EXTS
-    preview_update = gr.update(value=str(stored_original) if is_image else None, visible=is_image)
+    preview_update = gr.update(value=str(stored_original) if is_image else None, visible=is_image, height=height)
     
     # Generate HTML iframe for PDF preview
     if not is_image:
         # Use Gradio's file parameter to get the correct URL
         file_url = f"/gradio_api/file={stored_original}"
-        file_html = f'<iframe src="{file_url}" width="100%" height="560" style="border: none;"></iframe>'
+        file_html = f'<iframe src="{file_url}" width="100%" height="{height}" style="border: none;"></iframe>'
         file_update = gr.update(value=file_html, visible=True)
     else:
         file_update = gr.update(value=None, visible=False)
@@ -546,7 +549,8 @@ def process_file(file, data_choice, pipeline_label, device):
     )
 
 
-def load_from_library(record_id):
+def load_from_library(record_id, preview_size):
+    height = PREVIEW_SIZES.get(preview_size, 560)
     if not record_id:
         return "", gr.update(value=None, visible=False), gr.update(value=None, visible=True)
 
@@ -561,12 +565,12 @@ def load_from_library(record_id):
         if is_image:
             return (
                 text,
-                gr.update(value=original if is_image else None, visible=is_image),
+                gr.update(value=original if is_image else None, visible=is_image, height=height),
                 gr.update(value=None, visible=False),
             )
         else:
             file_url = f"/gradio_api/file={original}"
-            file_html = f'<iframe src="{file_url}" width="100%" height="560" style="border: none;"></iframe>'
+            file_html = f'<iframe src="{file_url}" width="100%" height="{height}" style="border: none;"></iframe>'
             return (
                 text,
                 gr.update(value=None, visible=False),
@@ -599,17 +603,41 @@ def load_from_library(record_id):
     if is_image:
         return (
             content,
-            gr.update(value=original if is_image else None, visible=is_image),
+            gr.update(value=original if is_image else None, visible=is_image, height=height),
             gr.update(value=None, visible=False),
         )
     else:
         file_url = f"/gradio_api/file={original}"
-        file_html = f'<iframe src="{file_url}" width="100%" height="560" style="border: none;"></iframe>'
+        file_html = f'<iframe src="{file_url}" width="100%" height="{height}" style="border: none;"></iframe>'
         return (
             content,
             gr.update(value=None, visible=False),
             gr.update(value=file_html, visible=True),
         )
+
+
+def change_preview_size(size_label, current_record_id):
+    height = PREVIEW_SIZES.get(size_label, 560)
+    is_small = size_label == "Small"
+    img_update = gr.update(height=height)
+
+    file_update = gr.update()
+    if current_record_id:
+        record = find_record(current_record_id)
+        if record and record["status"] == "done":
+            original = record["original_path"]
+            is_image = Path(original).suffix.lower() in IMAGE_EXTS
+            if not is_image:
+                file_url = f"/gradio_api/file={original}"
+                file_html = f'<iframe src="{file_url}" width="100%" height="{height}" style="border: none;"></iframe>'
+                file_update = gr.update(value=file_html, visible=True)
+            else:
+                file_update = gr.update(value=None, visible=False)
+
+    preview_col_update = gr.update(scale=1)
+    editor_col_update = gr.update(scale=2 if is_small else 1)
+
+    return height, img_update, file_update, preview_col_update, editor_col_update
 
 
 def pull_from_editorjs(edited_json):
@@ -733,7 +761,7 @@ EDITOR_HEAD = """
     position: fixed;
     z-index: 2;
     background-color: #3b3b3b;
-    width: calc(100% - 26px);
+    width: 100%;
   }
   #editorjs-undo-bar button {
     height: 28px;
@@ -760,12 +788,20 @@ EDITOR_HEAD = """
   body.dark #editorjs-undo-bar button:active:not(:disabled) {
     background: #896755;
   }
-  .editorjs-column {
-    transform: translateZ(0);
+  #editorjs-column {
+    transform: translateZ(0) !important;
   }
   .gradio-container-6-20-0 .gradio-style button {
     padding: 4px;
     margin-bottom: 0px;
+  }
+  #preview-column {
+  }
+  .column-divider {
+    margin: 10px 0;
+  }
+  #editorjs-column div .html-container {
+    padding: 0;
   }
   
   /* Alignment tune styles */
@@ -1562,10 +1598,11 @@ def build_demo():
         )
 
         current_record = gr.State(value=None)
+        preview_size = gr.State(value=560)
 
         # --- Controls, all up top: input + pipeline + run on one line,
         # status + workspace history on the next. ---
-        with gr.Row():
+        with gr.Row(equal_height=True,min_height=242):
             file_input = gr.File(label="Upload PDF or Image", scale=2)
             data_dir_dropdown = gr.Dropdown(
                 choices=list_data_dir(), label="...or pick a file already in /mnt/data", scale=2
@@ -1578,11 +1615,10 @@ def build_demo():
                 choices=["gpu", "cpu"], value="gpu", label="Device", scale=1,
                 info="gpu is the default; switch to cpu only for debugging."
             )
-            run_button = gr.Button("Run", variant="primary", scale=1)
 
         with gr.Row():
             status_box = gr.Textbox(label="Status", lines=2, interactive=False, scale=2)
-            save_button = gr.Button("Save edits")
+            run_button = gr.Button("Run", variant="primary", scale=1)
 
         with gr.Sidebar(position="left"):
             gr.Markdown("# 🐾 Workspace history")
@@ -1593,13 +1629,21 @@ def build_demo():
                 label="Workspace history", interactive=True, scale=1
             )
 
+            with gr.Row():
+                size_selector = gr.Radio(
+                    choices=["Small", "Normal (Actual)"], value="Normal (Actual)",
+                    label="Preview Size", scale=0, min_width=200
+                )
+
         # --- Below: original on the left, combined preview+edit on the right. ---
         with gr.Row():
-            with gr.Column():
+            with gr.Column(elem_id="preview-column") as preview_column:
+                save_button = gr.Button("Save edits")
+                gr.HTML("<div class='column-divider'></div>")
                 image_preview = gr.Image(label="Original", visible=False, height=560)
                 file_preview = gr.HTML(label="Original file", visible=True)
 
-            with gr.Column(elem_classes="editorjs-column"):
+            with gr.Column(elem_id="editorjs-column") as editor_column:
                 # Editor.js renders JSON blocks directly, so this one
                 # pane replaces the separate Preview + Edit tabs -- what
                 # you see is what you can immediately click into and edit.
@@ -1617,7 +1661,7 @@ def build_demo():
 
         run_button.click(
             process_file,
-            inputs=[file_input, data_dir_dropdown, pipeline_selector, device_selector],
+            inputs=[file_input, data_dir_dropdown, pipeline_selector, device_selector, preview_size],
             outputs=[status_box, library_dropdown, image_preview, file_preview, editorjs_hidden],
         ).then(
             # New content just landed in the hidden textbox -- render it into Editor.js.
@@ -1630,12 +1674,18 @@ def build_demo():
         # record for saving.
         library_dropdown.change(
             load_from_library,
-            inputs=[library_dropdown],
+            inputs=[library_dropdown, preview_size],
             outputs=[editorjs_hidden, image_preview, file_preview],
         ).then(
             fn=None, js=_PUSH_INTO_EDITORJS_JS
         )
         library_dropdown.change(lambda rid: rid, inputs=[library_dropdown], outputs=[current_record])
+
+        size_selector.change(
+            change_preview_size,
+            inputs=[size_selector, current_record],
+            outputs=[preview_size, image_preview, file_preview, preview_column, editor_column],
+        )
 
         save_button.click(
             # Grab the latest Editor.js data before running the Python save.
