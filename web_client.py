@@ -346,6 +346,8 @@ def list_data_dir():
 def library_choices(records):
     """Build (label, value) pairs for the workspace dropdown."""
     return [
+        ("— Select a workspace —", ""),
+    ] + [
         (f"{r['original_name']}  ·  {r['pipeline']}  ·  {r['timestamp']}", r["id"])
         for r in records
     ]
@@ -1587,7 +1589,8 @@ def build_demo():
             gr.Markdown("Select a workspace to load")
 
             library_dropdown = gr.Dropdown(
-                choices=library_choices(load_index()), label="Workspace history", interactive=True, scale=1
+                choices=library_choices(load_index()), value="",
+                label="Workspace history", interactive=True, scale=1
             )
 
         # --- Below: original on the left, combined preview+edit on the right. ---
