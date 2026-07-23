@@ -664,14 +664,14 @@ EDITOR_HEAD = """
 <script src="https://cdn.jsdelivr.net/npm/@editorjs/attaches@latest/dist/bundle.js" defer></script>
 <script src="https://cdn.jsdelivr.net/npm/@editorjs/raw@latest/dist/bundle.js" defer></script>
 <style>
-  #editorjs-editor-wrap { border: 1px solid var(--border-color-primary, #444); border-radius: 8px; }
+  #editorjs-editor-wrap { border: 1px solid #3b3b3b; max-height: 90vh; overflow-y: auto; }
   /* editorjs_hidden_content is a bridge component only -- it must stay
      mounted in the DOM for the JS push/pull snippets to find it, so we
      hide it with CSS rather than Gradio's visible=False (which can
      conditionally unmount the component instead of just hiding it,
      silently breaking the bridge). */
   #editorjs_hidden_content { display: none !important; }
-  #editorjs { min-height: 560px; background: var(--background-fill-primary, #fff); padding: 20px; }
+  #editorjs { min-height: 560px; background: var(--background-fill-primary, #fff); padding: 50px 10px 10px 10px; }
   .ce-block__content { font-size: 15px; line-height: 1.6; }
   .ce-toolbar__content { max-width: 100%; }
   
@@ -728,26 +728,42 @@ EDITOR_HEAD = """
     gap: 4px;
     padding: 6px 10px;
     border-bottom: 1px solid var(--border-color-primary, #444);
+    position: fixed;
+    z-index: 2;
+    background-color: #3b3b3b;
+    width: calc(100% - 26px);
   }
-  body.dark #editorjs-undo-bar button {
-    background: #52525b;
-    color: #fff;
-    border: 1px solid var(--border-color-primary, #444);
-    border-radius: 6px;
+  #editorjs-undo-bar button {
+    height: 28px;
+   border-radius: 6px;
     padding: 4px 12px;
+    height: 28px;
     font-size: 13px;
     cursor: pointer;
     transition: background 0.15s, opacity 0.15s;
   }
+
+  body.dark #editorjs-undo-bar button {
+    background: #52525b;
+    color: #fff;
+    border: 1px solid var(--border-color-primary, #444);
+  }
   body.dark #editorjs-undo-bar button:hover:not(:disabled) {
     background: #80808f;
   }
-  body.dark #editorjs-undo-bar button:disabled {
+  #editorjs-undo-bar button:disabled {
     opacity: 0.35;
     cursor: not-allowed;
   }
   body.dark #editorjs-undo-bar button:active:not(:disabled) {
     background: #896755;
+  }
+  .editorjs-column {
+    transform: translateZ(0);
+  }
+  .gradio-container-6-20-0 .gradio-style button {
+    padding: 4px;
+    margin-bottom: 0px;
   }
   
   /* Alignment tune styles */
@@ -1564,17 +1580,23 @@ def build_demo():
 
         with gr.Row():
             status_box = gr.Textbox(label="Status", lines=2, interactive=False, scale=2)
+            save_button = gr.Button("Save edits")
+
+        with gr.Sidebar(position="left"):
+            gr.Markdown("# 🐾 Workspace history")
+            gr.Markdown("Select a workspace to load")
+
             library_dropdown = gr.Dropdown(
-                choices=library_choices(load_index()), label="Workspace history", interactive=True, scale=2
+                choices=library_choices(load_index()), label="Workspace history", interactive=True, scale=1
             )
 
         # --- Below: original on the left, combined preview+edit on the right. ---
         with gr.Row():
-            with gr.Column(scale=1):
+            with gr.Column():
                 image_preview = gr.Image(label="Original", visible=False, height=560)
                 file_preview = gr.HTML(label="Original file", visible=True)
 
-            with gr.Column(scale=2):
+            with gr.Column(elem_classes="editorjs-column"):
                 # Editor.js renders JSON blocks directly, so this one
                 # pane replaces the separate Preview + Edit tabs -- what
                 # you see is what you can immediately click into and edit.
@@ -1582,7 +1604,6 @@ def build_demo():
                 # Bridge only -- never shown to the user. Editor.js's JSON
                 # lives here so Python can read/write it.
                 editorjs_hidden = gr.Textbox(elem_id="editorjs_hidden_content", visible=True)
-                save_button = gr.Button("Save edits")
 
         # Mount Editor.js once, as soon as the page loads.
         demo.load(fn=None, js=_EDITORJS_INIT_JS)
