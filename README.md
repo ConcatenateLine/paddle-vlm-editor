@@ -110,7 +110,17 @@ All processed files appear in the **Workspace** dropdown, sorted newest-first. S
 
 ```
 paddle-vlm-editor/
-├── web_client.py           # Main application: Gradio UI, pipeline dispatching, Editor.js integration
+├── web_client.py           # Gradio entry-point (thin UI wiring)
+├── config.py               # Constants, paths, pipeline definitions
+├── persistence.py          # Workspace-index CRUD and file-listing
+├── runners.py              # Per-pipeline result extraction
+├── pipeline_cache.py       # Pipeline factory, caching, subprocess dispatch
+├── editor.py               # Editor.js asset loaders
+├── static/                 # CSS / JS fragments loaded by editor.py
+│   ├── editor_head.html    # CDN scripts + styles for <head>
+│   ├── editorjs_init.js    # Editor.js mount logic
+│   ├── push_into.js        # JS bridge: hidden textbox -> Editor.js
+│   └── pull_from.js        # JS bridge: Editor.js -> hidden textbox
 ├── doc_parser_worker.py    # Subprocess worker for PaddleOCR-VL pipeline
 ├── docker-compose.yml      # Docker Compose configuration
 ├── data/                   # Input files (mounted as /mnt/data)
@@ -132,8 +142,14 @@ paddle-vlm-editor/
 |---|---|---|
 | `./data` | `/mnt/data` | Input files directory |
 | `./output` | `/mnt/output` | Persistent results storage |
-| `./web_client.py` | `/workspace/web_client.py` | Main app script |
+| `./web_client.py` | `/workspace/web_client.py` | Gradio entry-point |
+| `./config.py` | `/workspace/config.py` | Constants and paths |
+| `./persistence.py` | `/workspace/persistence.py` | Workspace index CRUD |
+| `./runners.py` | `/workspace/runners.py` | Pipeline runners |
+| `./pipeline_cache.py` | `/workspace/pipeline_cache.py` | Pipeline cache and dispatch |
+| `./editor.py` | `/workspace/editor.py` | Editor.js asset loaders |
 | `./doc_parser_worker.py` | `/workspace/doc_parser_worker.py` | Subprocess worker script |
+| `./static` | `/workspace/static` | CSS / JS assets |
 | `./paddlex_cache` | `/home/paddleocr/.paddlex` | Model weight cache |
 
 ### Document Parser Subprocess

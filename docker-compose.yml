@@ -14,9 +14,16 @@ services:
     volumes:
       - ./data:/mnt/data       # input files
       - ./output:/mnt/output   # results
-      - ./web_client.py:/workspace/web_client.py  # copy script into container
       - ./paddlex_cache:/home/paddleocr/.paddlex
+      # Application source
+      - ./web_client.py:/workspace/web_client.py
+      - ./config.py:/workspace/config.py
+      - ./persistence.py:/workspace/persistence.py
+      - ./runners.py:/workspace/runners.py
+      - ./pipeline_cache.py:/workspace/pipeline_cache.py
+      - ./editor.py:/workspace/editor.py
       - ./doc_parser_worker.py:/workspace/doc_parser_worker.py
+      - ./static:/workspace/static
     shm_size: "32g"
     ports:
       - "7860:7860"
